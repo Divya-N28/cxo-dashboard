@@ -123,8 +123,8 @@ const sourceTypes = [
     { SourceCategory: "CareerPage", SourceName: "CareerPage" }
 ];
 
-const API_TOKEN = "eyJhbGciOiJSUzI1NiIsImtpZCI6IkEyRkExMDQyMjNCQUEzQkZGOUZGRjNFNUIzOTY3QzcxRUYzRkRERjRSUzI1NiIsIng1dCI6Im92b1FRaU82bzdfNV9fUGxzNVo4Y2U4XzNmUSIsInR5cCI6ImF0K2p3dCJ9.eyJpc3MiOiJodHRwczovL2lkZW50aXR5LnR1cmJvaGlyZS5jbyIsIm5iZiI6MTc0MjA1NzQwMiwiaWF0IjoxNzQyMDU3NDAyLCJleHAiOjE3NDIwNjEwMDIsImF1ZCI6Imh0dHBzOi8vdGhpZGVudGl0eXYyLmF6dXJld2Vic2l0ZXMubmV0L2NvcmUvcmVzb3VyY2VzIiwic2NvcGUiOlsiYXBpIiwib2ZmbGluZV9hY2Nlc3MiXSwiYW1yIjpbInBhc3N3b3JkIl0sImNsaWVudF9pZCI6IlRILk12Yy5BcGkiLCJzdWIiOiI4OGFiOWJjMS0yMDY5LTQwYmMtOWMzMS0xNjlhMWY5ZGIzNzIiLCJhdXRoX3RpbWUiOjE3NDE4NzQ3OTAsImlkcCI6ImxvY2FsIiwicHJlZmVycmVkX3VzZXJuYW1lIjoiY2hpdHJha2FubmFuLmI2Mzg3NTY1Mjk3MTQ3ODQwNDEiLCJlbWFpbCI6ImNoaXRyYWthbm5hbi5iQGlkZWFzMml0LmNvbSIsImVtYWlsX3ZlcmlmaWVkIjoiZmFsc2UiLCJyb2xlIjpbIkFkbWluIiwiU3VwZXJVc2VyIl0sImdpdmVuX25hbWUiOiJDaGl0cmFrYW5uYW4iLCJmYW1pbHlfbmFtZSI6IkIiLCJ6b25laW5mbyI6ImM5ZTQyODUwLWI2MjYtNDJiYi1hYzIyLTY2OWRmOTU5Njk0OSIsImp0aSI6IkQ5OEM3QUU4QUVDMEREQkU5RjIxQzM3OUI1MjgwNDBGIn0.MK9KsdImmzh7VrfU37mJ9rVVKRZcKoxWl8JZiNNhrw-bOK3TWt2rxTQpuz4PM35U-Fm_AFPQQpU0J-P-JPQTwp70aBT6Gkk8O7TZvHDdg-TA_FBan_1ujuD6xbp64F6XtgPa_W7_MYNAwI5NaQAABJtAtoCZSwJPDfyTgPjvwS0Wm6SmJPyijyUFk7SbB_ptrmQeRq4Z11e14TLkxRqun47Brcfy-gwYSIqvHNOmxtTUO8KbJMrVQJlsMQqX7R8pLuDYf9Fzc0UpWFLJ16hHNcrzlkSLImh-RkqdI2juI07RvvYiGdXNYs9YqvXVpHpFcalYgLuQBEOzJU0fEgsr3w";
-const API_BASE_URL = process.env.API_BASE_URL || 'https://api.turbohire.co/api/v3';
+let API_TOKEN = "";
+const API_BASE_URL = process.env.API_BASE_URL || 'https://api.turbohire.co/api';
 
 // Create axios instance with default config
 const apiClient = axios.create({
@@ -139,7 +139,6 @@ apiClient.interceptors.request.use((config) => {
     config.headers.Authorization = `Bearer ${API_TOKEN}`;
     return config;
 }, (error) => {
-    console.error('Request interceptor error:', error);
     return Promise.reject(error);
 });
 
@@ -290,7 +289,7 @@ async function fetchStageData(jobId: string, startDate: string, endDate: string,
         };
 
         const response = await apiClient.post(
-            `/job/${jobId}/filteredcount`,
+            `v3/job/${jobId}/filteredcount`,
             payload
         );
 
@@ -409,7 +408,7 @@ async function fetchSourceData(jobId: string, startDate: string, endDate: string
             FetchOnlyActiveCandidates: status === -1
         };
         const response = await apiClient.post(
-            `/job/${jobId}/filteredcount`,
+            `v3/job/${jobId}/filteredcount`,
             payload
         );
 
@@ -475,14 +474,56 @@ const calculatePercentage = (numerator: number, denominator: number): string => 
     return `${percentage || 0}%`;
 };
 
-export async function generateMonthlyData(jobs: Job[]): Promise<MonthlyData[]> {
+// Add a function to test API token validity
+async function testApiToken(): Promise<boolean> {
     try {
-        if (!API_TOKEN) {
-            return []; // Return empty array instead of throwing
+        // Store token temporarily for this test request        
+        // Make a simple API call to test token validity
+        // Using the first job in the list to test
+        const response = await apiClient.get('org/c9e42850-b626-42bb-ac22-669df9596949/jobs/partialdata');
+        
+        // If we get here, the token is valid
+        return true;
+    } catch (error) {
+        if (axios.isAxiosError(error)) {
+            // Handle specific error codes
+            if (error.response?.status === 401) {
+                // Clear token from session storage
+                if (typeof window !== 'undefined') {
+                    sessionStorage.removeItem('apiToken');
+                }
+            } else if (error.response?.status === 403) {
+                console.error('Access forbidden. Please check your permissions.');
+            } else {
+                console.error('API test failed:', error.message);
+            }
+        } else {
+            console.error('Unknown error during API test:', error);
+        }
+        return false;
+    }
+}
+
+export async function generateMonthlyData(jobs: Job[], token: string): Promise<{ data: MonthlyData[], error?: { status: number, message: string } }> {
+    try {
+        if (!token) {
+            return { 
+                data: [],
+                error: { status: 401, message: 'API token is required' }
+            };
         }
 
         if (!jobs || jobs.length === 0) {
-            return [];
+            return { data: [] };
+        }
+        API_TOKEN = token;
+        // Test token validity first
+        const isTokenValid = await testApiToken();
+        if (!isTokenValid) {
+            return { 
+                data: [],
+                error: { status: 401, message: 'Invalid API token' }
+            };
         }
 
         const monthlyData: MonthlyData[] = [];
@@ -544,7 +585,7 @@ export async function generateMonthlyData(jobs: Job[]): Promise<MonthlyData[]> {
 
                 // Add a small delay between batches to prevent rate limiting
                 if (i + batchSize < jobs.length) {
-                    await delay(5000);
+                    await delay(1000);
                 }
             }
 
@@ -677,9 +718,27 @@ export async function generateMonthlyData(jobs: Job[]): Promise<MonthlyData[]> {
                 stageConversionRates
             });
         }
-        return monthlyData;
+        return { data: monthlyData };
     } catch (error) {
-        // Return empty array instead of throwing
-        return [];
+        // Handle errors and return appropriate status
+        if (axios.isAxiosError(error)) {
+            const status = error.response?.status || 500;
+            const message = error.message || 'Unknown error occurred';
+            
+            // For 401 errors, clear the token from session storage
+            if (status === 401 && typeof window !== 'undefined') {
+                sessionStorage.removeItem('apiToken');
+            }
+            
+            return { 
+                data: [],
+                error: { status, message }
+            };
+        }
+        
+        return { 
+            data: [],
+            error: { status: 500, message: 'Unknown error occurred' }
+        };
     }
 } 
