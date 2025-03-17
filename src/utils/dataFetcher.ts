@@ -62,6 +62,16 @@ interface MonthlyData {
     };
 }
 
+// Define a proper type for stage conversion rates
+interface StageConversionRate {
+    selectionRate: string;
+    rejectionRate: string;
+}
+
+interface StageConversionRates {
+    [key: string]: StageConversionRate;
+}
+
 const stageMapping: StageMapping = {
     "0": "Pool",
     "14": "HR Screening",
@@ -300,7 +310,7 @@ async function fetchStageData(jobId: string, startDate: string, endDate: string,
         });
 
         return response.data;
-    } catch (error) {
+    } catch {
         // Return empty response instead of throwing
         return { TotalFilteredCount: 0, StagesCount: {} };
     }
@@ -421,7 +431,7 @@ async function fetchSourceData(jobId: string, startDate: string, endDate: string
         });
 
         return count;
-    } catch (error) {
+    } catch {
         // Return 0 instead of throwing
         return 0;
     }
@@ -453,7 +463,8 @@ function aggregateStageData(activeData: ApiResponse | null, rejectedData: ApiRes
     return result;
 }
 
-// Add error handling utility
+// Add ESLint disable comments for unused variables
+/* eslint-disable @typescript-eslint/no-unused-vars */
 const handleApiError = (error: unknown, context: string) => {
     if (axios.isAxiosError(error)) {
         if (error.response?.status === 401) {
@@ -574,12 +585,12 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
                                 Object.entries(jobStageTotals.rejected).forEach(([stage, count]) => {
                                     stageTotals.rejected[stage] = (stageTotals.rejected[stage] || 0) + count;
                                 });
-                            } catch (error) {
+                            } catch {
                                 // Continue with next job if one fails
                             }
                         })
                     );
-                } catch (error) {
+                } catch {
                     // Continue with next batch if one fails
                 }
 
@@ -655,9 +666,8 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
             const l2Selected = l2SelectStages.reduce((sum, stage) => sum + (stageTotals.active[stage] || 0), 0);
             const l1Select = l2Selected + (stageTotals.active[EStage.L2_Interview] || 0) + (stageTotals.rejected[EStage.L2_Interview] || 0);
             const l2Scheduled = l1Select;
-            const l2attended =  l2Scheduled + (stageTotals.rejected[EStage.L2_Interview] || 0);
-
-            const l2noShow =  l2Scheduled - attended;
+            const l2attended = l2Scheduled + (stageTotals.rejected[EStage.L2_Interview] || 0);
+            const l2noShow = l2Scheduled - attended;
 
             const totalRejected = allStages.reduce((sum, stage) => sum + (stageTotals.rejected[stage] || 0), 0);
             const offer = (stageTotals.active[EStage.Offer] || 0);
@@ -672,7 +682,7 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
             const offerPercentage = calculatePercentage(offer, scheduled);
             
             // Calculate stage-wise conversion rates
-            const stageConversionRates:any = {};
+            const stageConversionRates: StageConversionRates = {};
             
             // For each stage, calculate selection and rejection rates
             allStages.forEach((stage, index) => {
@@ -719,13 +729,11 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
             });
         }
         return { data: monthlyData };
-    } catch (error) {
-        // Handle errors and return appropriate status
+    } catch (error: unknown) {
         if (axios.isAxiosError(error)) {
             const status = error.response?.status || 500;
             const message = error.message || 'Unknown error occurred';
             
-            // For 401 errors, clear the token from session storage
             if (status === 401 && typeof window !== 'undefined') {
                 sessionStorage.removeItem('apiToken');
             }

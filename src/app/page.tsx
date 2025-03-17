@@ -1,10 +1,9 @@
 "use client"
 
 import { Card } from "@/components/ui/card";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsivePie } from "@nivo/pie";
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import { generateMonthlyData } from '@/utils/dataFetcher';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
@@ -51,19 +50,13 @@ interface MonthlyData {
   totalRejected: number;
   totalOffers: number;
   activePipeline: number;
+  stageConversionRates: {
+    [key: string]: {
+      selectionRate: string;
+      rejectionRate: string;
+    }
+  };
 }
-
-// Add specific interface for offers chart data
-interface OffersChartData {
-  month: string;
-  offers: number;
-}
-
-// Update background pattern to be more subtle and modern
-const backgroundPattern = {
-  backgroundColor: '#f7f9fc', // Light, clean background like in the first image
-  backgroundImage: 'none' // Remove pattern for cleaner look
-};
 
 // Update the chart theme with a more modern color palette inspired by the examples
 const chartTheme = {
@@ -85,7 +78,7 @@ const chartTheme = {
   grid: {
     line: {
       stroke: "#e2e8f0",
-      strokeWidth: 0.5 // Thinner grid lines for a cleaner look like in the examples
+      strokeWidth: 0.5
     }
   },
   legends: {
@@ -95,24 +88,24 @@ const chartTheme = {
       fontWeight: 500
     }
   },
-  // Modern color palette inspired by the examples
   colors: ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6'],
-  background: '#ffffff',
-  textColor: '#334155',
+  text: {
+    fill: '#334155',
+    fontSize: 11
+  },
+  background: '#ffffff'
 } as const;
 
 // Define channel colors with more vibrant options inspired by the examples
-const channelColors = {
+interface ChannelColors {
+  [key: string]: string;
+}
+
+const channelColors: ChannelColors = {
   "Naukri": "#f59e0b",    // Amber
   "Referral": "#3b82f6",  // Blue
   "Vendor": "#10b981",    // Emerald
   "Linkedin": "#0077b5"   // LinkedIn blue
-};
-
-// Update card background color constant to white with subtle shadow like in examples
-const cardBackground = {
-  backgroundColor: "#ffffff",
-  boxShadow: "0 1px 3px rgba(0,0,0,0.1)"
 };
 
 // Add this helper function to get months till current date
@@ -123,7 +116,6 @@ const getAvailableMonths = () => {
   ];
 
   const currentDate = new Date();
-  const currentYear = currentDate.getFullYear();
   const currentMonth = currentDate.getMonth();
 
   const availableMonths = months.map((month, index) => ({
@@ -138,7 +130,10 @@ const getAvailableMonths = () => {
 };
 
 // Add the MonthSelector component
-const MonthSelector = ({ selectedMonth, setSelectedMonth }) => {
+const MonthSelector = ({ selectedMonth, setSelectedMonth }: { 
+  selectedMonth: string, 
+  setSelectedMonth: (month: string) => void 
+}) => {
   const availableMonths = getAvailableMonths();
 
   return (
@@ -190,22 +185,6 @@ const MonthSelector = ({ selectedMonth, setSelectedMonth }) => {
   );
 };
 
-// Define the Stage enum that's missing
-enum Stage {
-  Pool = "Pool",
-  HR_Screening = "HR_Screening",
-  Xobin_Test = "Xobin_Test",
-  L1_Interview = "L1_Interview",
-  L2_Interview = "L2_Interview",
-  Final_Round = "Final_Round",
-  HR_Round = "HR_Round",
-  Pre_Offer_Documentation = "Pre_Offer_Documentation",
-  Offer_Approval = "Offer_Approval",
-  Offer = "Offer",
-  Nurturing_Campaign = "Nurturing_Campaign",
-  Hired = "Hired"
-}
-
 // Define the jobs data
 const jobs = [
   { "JobId": "54a5cabd-ad1b-4bf2-b83c-02b9708657bd", "JobName": ".Net Developer(Angular)" },
@@ -245,22 +224,22 @@ const jobs = [
 
 export default function Dashboard() {
   const [selectedMonth, setSelectedMonth] = useState<string>('All');
-  const [pipelineView, setPipelineView] = useState<'active' | 'rejected'>('active');
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const monthOptions = ['All', 'Jan', 'Feb'];
 
   // Add this state for token management
   const [apiToken, setApiToken] = useState<string>('');
   const [showTokenModal, setShowTokenModal] = useState(false);
+
+  // Define allStages here
+  const allStages = Object.values(EStage);
 
   // Create a function to fetch data that can be called after token is submitted
   const fetchDashboardData = async (token: string) => {
     try {
       setIsLoading(true);
       setError(null);
-      // Pass the token to the data fetcher
       const data = await generateMonthlyData(jobs, token);
       if (data.error?.status === 401) {
         setError(data.error.message);
@@ -270,7 +249,8 @@ export default function Dashboard() {
         setMonthlyData(data.data);
       }
     } catch (err) {
-      setError('Failed to fetch dashboard data');
+      setError('Failed to fetch data');
+      console.error('Failed to fetch data:', err);
     } finally {
       setIsLoading(false);
     }
@@ -388,6 +368,91 @@ export default function Dashboard() {
     return monthlyData.find(data => data.month === selectedMonth) || null;
   }, [selectedMonth, monthlyData]);
 
+  // Add this function before the return statement in the Dashboard component
+  const exportStageConversionRates = () => {
+    if (!monthlyData.length) return;
+
+    const headers = [
+      'Month',
+      'Metric',
+      'Pool',
+      'HR Screening',
+      'Xobin Test',
+      'L1 Interview',
+      'L2 Interview',
+      'Final Round',
+      'HR Round',
+      'Pre Offer Doc',
+      'Offer Approval',
+      'Offer',
+      'Nurturing Campaign',
+      'Hired'
+    ];
+
+    let csvContent = headers.join(',') + '\n';
+
+    // Add data for each month
+    monthlyData.forEach(data => {
+      const selectionRow = [
+        data.month,
+        'Selection Rate'
+      ];
+
+      // Add selection rates for each stage
+      Object.values(EStage).forEach(stage => {
+        selectionRow.push(data.stageConversionRates[stage]?.selectionRate || 'N/A');
+      });
+
+      csvContent += selectionRow.join(',') + '\n';
+
+      const rejectionRow = [
+        data.month,
+        'Rejection Rate'
+      ];
+
+      // Add rejection rates for each stage
+      Object.values(EStage).forEach(stage => {
+        rejectionRow.push(data.stageConversionRates[stage]?.rejectionRate || 'N/A');
+      });
+
+      csvContent += rejectionRow.join(',') + '\n';
+    });
+
+    // Calculate and add average row
+    const avgSelectionRow = ['Average', 'Selection Rate'];
+    const avgRejectionRow = ['Average', 'Rejection Rate'];
+
+    Object.values(EStage).forEach(stage => {
+      // Calculate average selection rate
+      const selectionRates = monthlyData
+        .map(month => month.stageConversionRates[stage]?.selectionRate || '0%')
+        .map(rate => parseFloat(rate) || 0);
+      const avgSelection = selectionRates.reduce((sum, rate) => sum + rate, 0) / selectionRates.length;
+      avgSelectionRow.push(`${avgSelection.toFixed(2)}%`);
+
+      // Calculate average rejection rate
+      const rejectionRates = monthlyData
+        .map(month => month.stageConversionRates[stage]?.rejectionRate || '0%')
+        .map(rate => parseFloat(rate) || 0);
+      const avgRejection = rejectionRates.reduce((sum, rate) => sum + rate, 0) / rejectionRates.length;
+      avgRejectionRow.push(`${avgRejection.toFixed(2)}%`);
+    });
+
+    csvContent += avgSelectionRow.join(',') + '\n';
+    csvContent += avgRejectionRow.join(',') + '\n';
+
+    // Create and download the CSV file
+    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.setAttribute('href', url);
+    link.setAttribute('download', 'stage_conversion_rates.csv');
+    link.style.visibility = 'hidden';
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-screen bg-gray-900">
@@ -427,7 +492,7 @@ export default function Dashboard() {
       tickPadding: 5,
       tickRotation: 0,
       legend: 'Count',
-      legendPosition: 'middle',
+      legendPosition: 'middle' as const,
       legendOffset: -35,
       truncateTickAt: 0
     },
@@ -436,324 +501,11 @@ export default function Dashboard() {
       tickPadding: 5,
       tickRotation: 0,
       legend: 'Month',
-      legendPosition: 'middle',
+      legendPosition: 'middle' as const,
       legendOffset: 35,
       truncateTickAt: 0
     },
     legends: []
-  };
-
-  // Update the pie chart configuration
-  const channelChartConfig = {
-    data: currentMonthData?.channelData || [],
-    margin: { top: 20, right: 100, bottom: 20, left: 20 }, // Reduced right margin
-    innerRadius: 0.6,
-    padAngle: 0.5,
-    cornerRadius: 4,
-    activeOuterRadiusOffset: 8,
-    theme: chartTheme,
-    colors: { scheme: 'blues' },
-    borderWidth: 1,
-    borderColor: {
-      from: 'color',
-      modifiers: [['darker', 0.2]] as const
-    },
-    arcLinkLabelsSkipAngle: 10,
-    arcLinkLabelsTextColor: "#e5e7eb",
-    arcLinkLabelsThickness: 2,
-    arcLinkLabelsColor: { from: 'color' as const },
-    arcLabelsSkipAngle: 10,
-    arcLabelsTextColor: "#ffffff",
-    legends: [
-      {
-        anchor: 'right' as const,
-        direction: 'column' as const,
-        justify: false,
-        translateX: 80, // Reduced translation
-        translateY: 0,
-        itemsSpacing: 6, // Reduced spacing
-        itemWidth: 80, // Reduced width
-        itemHeight: 20, // Reduced height
-        itemTextColor: '#e5e7eb',
-        itemDirection: 'left-to-right' as const,
-        itemOpacity: 1,
-        symbolSize: 10, // Reduced symbol size
-        symbolShape: 'circle' as const
-      }
-    ]
-  };
-
-  // Line chart configuration for conversion trends
-  const conversionChartConfig = {
-    data: [
-      {
-        id: "Processed to Scheduled",
-        data: monthlyData.map(d => ({
-          x: d.month,
-          y: parseFloat(d.processedToScheduled)
-        }))
-      },
-      {
-        id: "L1 No Show Rate",
-        data: monthlyData.map(d => ({
-          x: d.month,
-          y: parseFloat(d.l1NoShowRate)
-        }))
-      },
-      {
-        id: "L1 Rejection Rate",
-        data: monthlyData.map(d => ({
-          x: d.month,
-          y: parseFloat(d.l1RejectionRate)
-        }))
-      }
-    ],
-    margin: { top: 50, right: 110, bottom: 50, left: 60 },
-    theme: chartTheme,
-    xScale: { type: 'point' as const },
-    yScale: {
-      type: 'linear' as const,
-      min: 0,
-      max: 100
-    },
-    curve: 'cardinal' as const,
-    axisTop: null,
-    axisRight: null,
-    axisBottom: {
-      tickSize: 5,
-      tickPadding: 5,
-      tickRotation: 0,
-      legend: 'Month',
-      legendOffset: 36,
-      legendPosition: 'middle' as const
-    },
-    axisLeft: {
-      tickSize: 5,
-      tickPadding: 5,
-      tickRotation: 0,
-      legend: 'Rate (%)',
-      legendOffset: -40,
-      legendPosition: 'middle' as const
-    },
-    pointSize: 10,
-    pointColor: { theme: 'background' },
-    pointBorderWidth: 2,
-    pointBorderColor: { from: 'serieColor' },
-    pointLabelYOffset: -12,
-    useMesh: true,
-    legends: [
-      {
-        anchor: 'bottom-right' as const,
-        direction: 'column' as const,
-        justify: false,
-        translateX: 100,
-        translateY: 0,
-        itemsSpacing: 0,
-        itemDirection: 'left-to-right' as const,
-        itemWidth: 80,
-        itemHeight: 20,
-        itemOpacity: 0.75,
-        symbolSize: 12,
-        symbolShape: 'circle' as const,
-        symbolBorderColor: 'rgba(0, 0, 0, .5)',
-        effects: [
-          {
-            on: 'hover' as const,
-            style: {
-              itemBackground: 'rgba(0, 0, 0, .03)',
-              itemOpacity: 1
-            }
-          }
-        ]
-      }
-    ]
-  };
-
-  // Funnel chart configuration
-  const funnelChartConfig = {
-    data: [
-      {
-        stage: "Processed",
-        value: currentMonthData?.processed || 0
-      },
-      {
-        stage: "Scheduled",
-        value: currentMonthData?.scheduled || 0
-      },
-      {
-        stage: "Attended",
-        value: currentMonthData?.attended || 0
-      },
-      {
-        stage: "L1 Select",
-        value: currentMonthData?.l1Select || 0
-      },
-      {
-        stage: "L2 Select",
-        value: currentMonthData?.l2Selected || 0
-      },
-      {
-        stage: "Offer",
-        value: currentMonthData?.totalOffers || 0
-      }
-    ],
-    keys: ["value"],
-    indexBy: "stage",
-    margin: { top: 30, right: 30, bottom: 50, left: 60 },
-    padding: 0.3,
-    theme: chartTheme,
-    colors: { scheme: 'blues' },
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: {
-      from: 'color',
-      modifiers: [['darker', 0.2]] as const
-    },
-    axisLeft: {
-      tickSize: 5,
-      tickPadding: 5,
-      tickRotation: 0,
-      legend: 'Count',
-      legendPosition: 'middle' as const,
-      legendOffset: -40
-    },
-    axisBottom: {
-      tickSize: 5,
-      tickPadding: 5,
-      tickRotation: -45,
-      legend: 'Stage',
-      legendPosition: 'middle' as const,
-      legendOffset: 40
-    },
-    labelSkipWidth: 12,
-    labelSkipHeight: 12,
-    labelTextColor: {
-      from: 'color',
-      modifiers: [['darker', 1.6]] as const
-    },
-    role: "application",
-    enableLabel: true
-  };
-
-  // Stage-wise Conversion Table - Month Comparison
-  const stageOrder = [
-    "Pool",
-    "HR Screening",
-    "Xobin Test",
-    "L1 Interview",
-    "L2 Interview",
-    "Final Round",
-    "HR Round",
-    "Pre Offer Documentation",
-    "Offer Approval",
-    "Offer",
-    "Nurturing Campaign",
-    "Hired"
-  ];
-
-  // Stage-wise Conversion Rates Table - NEW
-  const stageConversionRates = {
-    [EStage.Pool]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.HR_Screening]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.Xobin_Test]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.L1_Interview]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.L2_Interview]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.Final_Round]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.HR_Round]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.Pre_Offer_Documentation]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.Offer_Approval]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.Offer]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.Nurturing_Campaign]: { selectionRate: 0, rejectionRate: 0 },
-    [EStage.Hired]: { selectionRate: 0, rejectionRate: 0 }
-  };
-
-  const allStages = Object.keys(stageConversionRates);
-
-  // Add this function to export stage-wise conversion rates to CSV
-  const exportStageConversionRates = () => {
-    if (!monthlyData.length) return;
-
-    const headers = [
-      'Month',
-      'Metric',
-      'Pool',
-      'HR Screening',
-      'Xobin Test',
-      'L1 Interview',
-      'L2 Interview',
-      'Final Round',
-      'HR Round',
-      'Pre Offer Doc',
-      'Offer Approval',
-      'Offer',
-      'Nurturing Campaign',
-      'Hired'
-    ];
-
-    let csvContent = headers.join(',') + '\n';
-
-    // Add data for each month
-    monthlyData.forEach(data => {
-      // Selection rate row
-      let selectionRow = [
-        data.month,
-        'Selection Rate'
-      ];
-
-      // Add selection rates for each stage
-      Object.values(EStage).forEach(stage => {
-        selectionRow.push(data.stageConversionRates[stage]?.selectionRate || 'N/A');
-      });
-
-      csvContent += selectionRow.join(',') + '\n';
-
-      // Rejection rate row
-      let rejectionRow = [
-        data.month,
-        'Rejection Rate'
-      ];
-
-      // Add rejection rates for each stage
-      Object.values(EStage).forEach(stage => {
-        rejectionRow.push(data.stageConversionRates[stage]?.rejectionRate || 'N/A');
-      });
-
-      csvContent += rejectionRow.join(',') + '\n';
-    });
-
-    // Calculate and add average row
-    let avgSelectionRow = ['Average', 'Selection Rate'];
-    let avgRejectionRow = ['Average', 'Rejection Rate'];
-
-    Object.values(EStage).forEach(stage => {
-      // Calculate average selection rate
-      const selectionRates = monthlyData
-        .map(month => month.stageConversionRates[stage]?.selectionRate || '0%')
-        .map(rate => parseFloat(rate) || 0);
-      const avgSelection = selectionRates.reduce((sum, rate) => sum + rate, 0) / selectionRates.length;
-      avgSelectionRow.push(`${avgSelection.toFixed(2)}%`);
-
-      // Calculate average rejection rate
-      const rejectionRates = monthlyData
-        .map(month => month.stageConversionRates[stage]?.rejectionRate || '0%')
-        .map(rate => parseFloat(rate) || 0);
-      const avgRejection = rejectionRates.reduce((sum, rate) => sum + rate, 0) / rejectionRates.length;
-      avgRejectionRow.push(`${avgRejection.toFixed(2)}%`);
-    });
-
-    csvContent += avgSelectionRow.join(',') + '\n';
-    csvContent += avgRejectionRow.join(',') + '\n';
-
-    // Create and download the CSV file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'stage_conversion_rates.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
   };
 
   return (
@@ -783,7 +535,7 @@ export default function Dashboard() {
             </svg>
             {'Update API Token'}
           </Button>
-}
+        }
         </div>
       </div>
 
@@ -1288,15 +1040,30 @@ export default function Dashboard() {
               <Card className="p-6 bg-white shadow-sm rounded-lg">
                 <h2 className="text-lg font-semibold text-gray-900 mb-4">Monthly Offers</h2>
                 <div className="h-[250px]">
-                  <ResponsiveBar
-                    {...offersChartConfig}
+                  <ResponsiveBar<{ month: string; offers: number }>
+                    data={offersChartConfig.data}
+                    keys={offersChartConfig.keys}
+                    indexBy={offersChartConfig.indexBy}
+                    margin={offersChartConfig.margin}
+                    padding={offersChartConfig.padding}
+                    axisLeft={{
+                      ...offersChartConfig.axisLeft,
+                      legendPosition: 'middle'
+                    }}
+                    axisBottom={{
+                      ...offersChartConfig.axisBottom,
+                      legendPosition: 'middle'
+                    }}
+                    legends={offersChartConfig.legends}
                     theme={{
                       ...chartTheme,
                       background: '#ffffff',
-                      textColor: '#374151',
-                      fontSize: 11
+                      text: {
+                        fill: '#374151',
+                        fontSize: 11
+                      }
                     }}
-                    colors={['#3b82f6']} // Blue like in examples
+                    colors={['#3b82f6']}
                     borderRadius={4}
                   />
                 </div>
