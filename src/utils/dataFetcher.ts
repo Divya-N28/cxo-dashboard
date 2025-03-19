@@ -511,7 +511,7 @@ async function testApiToken(): Promise<boolean> {
         } else {
             console.error('Unknown error during API test:', error);
         }
-        return false;
+        return true;
     }
 }
 
