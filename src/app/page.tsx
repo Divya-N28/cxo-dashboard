@@ -11,6 +11,7 @@ import { cn } from '@/lib/utils';
 import { FiCalendar } from 'react-icons/fi';
 import React from 'react';
 import { EStage } from "@/types/dashboard";
+import { Check, ChevronDown } from 'lucide-react';
 
 // Define types for better type safety
 interface ChannelData {
@@ -185,6 +186,80 @@ const MonthSelector = ({ selectedMonth, setSelectedMonth }: {
   );
 };
 
+// Add the JobSelector component after the MonthSelector
+const JobSelector = ({ selectedJobs, setSelectedJobs }: { 
+  selectedJobs: string[], 
+  setSelectedJobs: (jobs: string[]) => void 
+}) => {
+  // Sort jobs by JobName
+  const sortedJobs = [...jobs].sort((a, b) => a.JobName.localeCompare(b.JobName));
+  
+  const toggleJob = (jobId: string) => {
+    if (jobId === 'all') {
+      // Toggle "All Jobs" - if all jobs are selected, deselect all; otherwise, select all
+      if (selectedJobs.length === jobs.length) {
+        setSelectedJobs([]);
+      } else {
+        setSelectedJobs(jobs.map(job => job.JobId));
+      }
+    } else if (selectedJobs.includes(jobId)) {
+      // If job is already selected, remove it
+      setSelectedJobs(selectedJobs.filter(id => id !== jobId));
+    } else {
+      // Add the job to selection
+      setSelectedJobs([...selectedJobs, jobId]);
+    }
+  };
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          className="w-[240px] justify-start text-left font-normal"
+        >
+          <ChevronDown className="mr-2 h-4 w-4" />
+          {selectedJobs.length === jobs.length 
+            ? 'All Jobs' 
+            : selectedJobs.length === 0 
+              ? 'Select Jobs' 
+              : `${selectedJobs.length} Job${selectedJobs.length > 1 ? 's' : ''} Selected`}
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[280px] p-0 max-h-[400px] overflow-auto" align="start">
+        <div className="space-y-4 p-4">
+          <div className="grid gap-2">
+            <div 
+              className="flex items-center space-x-2 rounded-md p-2 hover:bg-gray-100 cursor-pointer"
+              onClick={() => toggleJob('all')}
+            >
+              <div className={`h-4 w-4 rounded border flex items-center justify-center ${selectedJobs.length === jobs.length ? 'bg-primary border-primary' : 'border-gray-300'}`}>
+                {selectedJobs.length === jobs.length && <Check className="h-3 w-3 text-white" />}
+              </div>
+              <span className="font-medium">All Jobs</span>
+            </div>
+            <div className="border-t my-2" />
+            <div className="grid gap-1">
+              {sortedJobs.map((job) => (
+                <div 
+                  key={job.JobId}
+                  className="flex items-center space-x-2 rounded-md p-2 hover:bg-gray-100 cursor-pointer"
+                  onClick={() => toggleJob(job.JobId)}
+                >
+                  <div className={`h-4 w-4 rounded border flex items-center justify-center ${selectedJobs.includes(job.JobId) ? 'bg-primary border-primary' : 'border-gray-300'}`}>
+                    {selectedJobs.includes(job.JobId) && <Check className="h-3 w-3 text-white" />}
+                  </div>
+                  <span className="text-sm">{job.JobName}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+};
+
 // Define the jobs data
 const jobs = [
   { "JobId": "54a5cabd-ad1b-4bf2-b83c-02b9708657bd", "JobName": ".Net Developer(Angular)" },
@@ -224,6 +299,7 @@ const jobs = [
 
 export default function Dashboard() {
   const [selectedMonth, setSelectedMonth] = useState<string>('All');
+  const [selectedJobs, setSelectedJobs] = useState<string[]>(jobs.map(job => job.JobId)); // Initialize with all jobs
   const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -240,7 +316,8 @@ export default function Dashboard() {
     try {
       setIsLoading(true);
       setError(null);
-      const data = await generateMonthlyData(jobs, token);
+      // Pass the selected jobs to the generateMonthlyData function
+      const data = await generateMonthlyData(jobs.filter(job => selectedJobs.includes(job.JobId)), token);
       if (data.error?.status === 401) {
         setError(data.error.message);
         sessionStorage.removeItem('apiToken');
@@ -255,6 +332,17 @@ export default function Dashboard() {
       setIsLoading(false);
     }
   };
+
+  // Add useEffect to load data when component mounts or when selectedJobs changes
+  React.useEffect(() => {
+    const token = sessionStorage.getItem('apiToken');
+    if (token) {
+      setApiToken(token);
+      fetchDashboardData(token);
+    } else {
+      setShowTokenModal(true);
+    }
+  }, [selectedJobs]); // Add selectedJobs as a dependency
 
   // Add the AuthTokenModal component
   const AuthTokenModal = () => {
@@ -298,7 +386,7 @@ export default function Dashboard() {
                 API Token
               </label>
               <input
-                type="password"
+                type="text"
                 id="token"
                 value={token}
                 onChange={(e) => setToken(e.target.value)}
@@ -521,6 +609,11 @@ export default function Dashboard() {
             <MonthSelector
               selectedMonth={selectedMonth}
               setSelectedMonth={setSelectedMonth}
+            />
+            <div className="h-6 w-px bg-gray-300"></div>
+            <JobSelector
+              selectedJobs={selectedJobs}
+              setSelectedJobs={setSelectedJobs}
             />
           </div>
 
