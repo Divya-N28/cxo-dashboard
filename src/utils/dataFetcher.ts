@@ -508,12 +508,13 @@ apiClient.interceptors.response.use(
                         'Content-Type': 'application/x-www-form-urlencoded',
                         'isdesktop': 'true',
                         'Origin': 'https://app.turbohire.co',
-                        'Referer': 'https://app.turbohire.co/'
+                        'Referer': 'https://app.turbohire.co/',
+                        "Authorization": `Bearer ${API_TOKEN}`
                     },
                     data: new URLSearchParams({
                         'client_id': 'TH.Mvc.Api',
                         'client_secret': 'a4dc1f627af9400084b56d8b68d8d910',
-                        'refresh_token': API_TOKEN,
+                        'refresh_token': "0F13791F3EE871E428403A486155470392321E766E2E2C3F45B55C0DFCA20B5E-1",
                         'grant_type': 'refresh_token'
                     }).toString()
                 });
