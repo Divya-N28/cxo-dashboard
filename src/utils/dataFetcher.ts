@@ -485,23 +485,77 @@ const calculatePercentage = (numerator: number, denominator: number): string => 
     return `${percentage || 0}%`;
 };
 
-// Add a function to test API token validity
+// Modify the API client to handle token refresh
+apiClient.interceptors.response.use(
+    (response) => response,
+    async (error) => {
+        // If the error is 401 and we haven't tried to refresh the token yet
+        if (error.response?.status === 401 && !error.config._retry) {
+            console.log("401 detected, attempting token refresh");
+            
+            // Mark this request as retried to prevent infinite loops
+            error.config._retry = true;
+            
+            try {
+                // Get refresh token directly from storage
+                
+                
+                // Make direct API call to refresh token
+                const response = await axios({
+                    method: 'post',
+                    url: 'https://identity.turbohire.co/connect/token',
+                    headers: {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'isdesktop': 'true',
+                        'Origin': 'https://app.turbohire.co',
+                        'Referer': 'https://app.turbohire.co/'
+                    },
+                    data: new URLSearchParams({
+                        'client_id': 'TH.Mvc.Api',
+                        'client_secret': 'a4dc1f627af9400084b56d8b68d8d910',
+                        'refresh_token': API_TOKEN,
+                        'grant_type': 'refresh_token'
+                    }).toString()
+                });
+                
+                // Save the new tokens
+                const newToken = response.data.access_token;
+                const newRefreshToken = response.data.refresh_token;
+                
+                console.log("Token refreshed successfully");
+                
+                API_TOKEN = newToken;
+                
+                // Update the original request and retry
+                error.config.headers.Authorization = `Bearer ${newToken}`;
+                return axios(error.config);
+            } catch (refreshError) {
+                console.error("Error refreshing token:", refreshError);
+                return Promise.reject(error);
+            }
+        }
+        
+        return Promise.reject(error);
+    }
+);
+
+// Update the testApiToken function to handle token refresh
 async function testApiToken(): Promise<boolean> {
     try {
-        // Store token temporarily for this test request        
         // Make a simple API call to test token validity
-        // Using the first job in the list to test
         const response = await apiClient.get('org/c9e42850-b626-42bb-ac22-669df9596949/jobs/partialdata');
         
         // If we get here, the token is valid
         return true;
     } catch (error) {
         if (axios.isAxiosError(error)) {
-            // Handle specific error codes
+            // Token refresh is handled by the interceptor, so if we still get 401 here,
+            // it means refresh failed or wasn't possible
             if (error.response?.status === 401) {
                 // Clear token from session storage
                 if (typeof window !== 'undefined') {
                     sessionStorage.removeItem('apiToken');
+                    sessionStorage.removeItem('refreshToken');
                 }
             } else if (error.response?.status === 403) {
                 console.error('Access forbidden. Please check your permissions.');
@@ -511,10 +565,26 @@ async function testApiToken(): Promise<boolean> {
         } else {
             console.error('Unknown error during API test:', error);
         }
-        return true;
+        return false;
     }
 }
 
+// Add a job-specific cache
+const jobDataCache = new Map<string, {
+  data: { [month: string]: MonthlyData };
+  timestamp: number;
+}>();
+
+// Add a function to get job data from cache
+export function getJobDataFromCache(jobId: string): { [month: string]: MonthlyData } | null {
+  const cachedData = jobDataCache.get(jobId);
+  if (cachedData && cachedData.timestamp > Date.now() - CACHE_DURATION) {
+    return cachedData.data;
+  }
+  return null;
+}
+
+// Modify the generateMonthlyData function to cache per job
 export async function generateMonthlyData(jobs: Job[], token: string): Promise<{ data: MonthlyData[], error?: { status: number, message: string } }> {
     try {
         if (!token) {
@@ -537,6 +607,26 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
             };
         }
 
+        // Check if we already have data for all jobs in cache
+        const cachedJobsData: { [jobId: string]: { [month: string]: MonthlyData } } = {};
+        let allJobsCached = true;
+        
+        for (const job of jobs) {
+            const jobData = getJobDataFromCache(job.JobId);
+            if (jobData) {
+                cachedJobsData[job.JobId] = jobData;
+            } else {
+                allJobsCached = false;
+                break;
+            }
+        }
+        
+        // If all jobs are cached, return combined data from cache
+        if (allJobsCached && Object.keys(cachedJobsData).length > 0) {
+            // We'll let the page.tsx combine the data
+            return { data: [] };
+        }
+
         const monthlyData: MonthlyData[] = [];
         const batchSize = 3; // Process 3 jobs at a time
 
@@ -555,180 +645,178 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
             }
         );
 
-        for (const monthData of months) {
-            let totalProcessed = 0;
-            let totalApplicants = 0;
-            const stageTotals = {
-                active: {} as { [key: string]: number },
-                rejected: {} as { [key: string]: number }
-            };
-
-            // Process jobs in batches with error handling
-            for (let i = 0; i < jobs.length; i += batchSize) {
-                try {
-                    const batch = jobs.slice(i, i + batchSize);
-                    await Promise.all(
-                        batch.map(async (job) => {
-                            try {
-                                const [activeData, rejectedData] = await Promise.all([
-                                    fetchStageData(job.JobId, monthData.startDate, monthData.endDate, -1),
-                                    fetchStageData(job.JobId, monthData.startDate, monthData.endDate, 1)
-                                ]);
-
-                                totalProcessed = (activeData?.TotalFilteredCount || 0) + (rejectedData?.TotalFilteredCount || 0);
-                                const jobStageTotals = aggregateStageData(activeData, rejectedData);
-
-                                // Combine with overall totals
-                                Object.entries(jobStageTotals.active).forEach(([stage, count]) => {
-                                    stageTotals.active[stage] = (stageTotals.active[stage] || 0) + count;
-                                });
-                                Object.entries(jobStageTotals.rejected).forEach(([stage, count]) => {
-                                    stageTotals.rejected[stage] = (stageTotals.rejected[stage] || 0) + count;
-                                });
-                            } catch {
-                                // Continue with next job if one fails
-                            }
-                        })
-                    );
-                } catch {
-                    // Continue with next batch if one fails
-                }
-
-                // Add a small delay between batches to prevent rate limiting
-                if (i + batchSize < jobs.length) {
-                    await delay(1000);
-                }
-            }
-
-            // Calculate total applicants (sum of all stages)
-            totalApplicants = allStages.reduce((sum, stage) => sum + (stageTotals.active[stage] || 0) + (stageTotals.rejected[stage] || 0), 0);
-            // Fetch source data
-            const channelData: ChannelData[] = [];
-
-            for (const source of sourceTypes) {
-                let activeCount = 0;
-                let rejectedCount = 0;
-
-                for (const job of jobs) {
-                    // Fetch active candidates
-                    const activeSourceCount = await fetchSourceData(
-                        job.JobId,
-                        monthData.startDate,
-                        monthData.endDate,
-                        source.SourceCategory,
-                        source.SourceName,
-                        -1
-                    );
-
-                    // Fetch rejected candidates
-                    const rejectedSourceCount = await fetchSourceData(
-                        job.JobId,
-                        monthData.startDate,
-                        monthData.endDate,
-                        source.SourceCategory,
-                        source.SourceName,
-                        1
-                    );
-
-                    activeCount += activeSourceCount;
-                    rejectedCount += rejectedSourceCount;
-                }
-
-                channelData.push({
-                    name: source.SourceName.charAt(0).toUpperCase() + source.SourceName.slice(1),
-                    value: activeCount + rejectedCount,
-                    active: activeCount,
-                    rejected: rejectedCount,
-                    percentage: calculatePercentage(activeCount + rejectedCount, totalApplicants)
-                });
-            }
-
-            // Create pipeline stages array
-            const pipelineStages: PipelineStage[] = Object.entries(stageMapping).map(([_, stageName]) => ({
-                stage: stageName,
-                active: stageTotals.active[stageName] || 0,
-                rejected: stageTotals.rejected[stageName] || 0
-            }));
-
-            const l1toHireActive = l1ScheduleStages.reduce((sum, stage) => sum + (stageTotals.active[stage] || 0), 0);
-            const l1toHireRejected = l1ScheduleStages.reduce((sum, stage) => sum + (stageTotals.rejected[stage] || 0), 0);
+        // Process each job individually and store in cache
+        for (const job of jobs) {
+            // Skip if already cached
+            if (cachedJobsData[job.JobId]) continue;
             
-            // Calculate metrics
-            const l1Reject = stageTotals.rejected[EStage.L1_Interview] || 0;
-            const l2Rejected = stageTotals.rejected[EStage.L2_Interview] || 0;
-
-            const processed = (stageTotals.active[EStage.Pool] || 0) + (stageTotals.active[EStage.HR_Screening] || 0) + (stageTotals.rejected[EStage.Pool] || 0) + (stageTotals.rejected[EStage.HR_Screening] || 0);
-            const scheduled = l1toHireActive + l1toHireRejected;
-            const attended =  scheduled - (stageTotals.active[EStage.L1_Interview] || 0);
+            const jobMonthlyData: { [month: string]: MonthlyData } = {};
             
-            const noShow =  scheduled - attended;
-
-            const l2Selected = l2SelectStages.reduce((sum, stage) => sum + (stageTotals.active[stage] || 0), 0);
-            const l1Select = l2Selected + (stageTotals.active[EStage.L2_Interview] || 0) + (stageTotals.rejected[EStage.L2_Interview] || 0);
-            const l2Scheduled = l1Select;
-            const l2attended = l2Scheduled + (stageTotals.rejected[EStage.L2_Interview] || 0);
-            const l2noShow = l2Scheduled - attended;
-
-            const totalRejected = allStages.reduce((sum, stage) => sum + (stageTotals.rejected[stage] || 0), 0);
-            const offer = (stageTotals.active[EStage.Offer] || 0);
-            const totalOffers = (stageTotals.active[EStage.Offer] || 0) + (stageTotals.active[EStage.Nurturing_Campaign] || 0) + (stageTotals.active[EStage.Hired] || 0);
-            const activePipeline = Math.abs(allStages.reduce((sum, stage) => sum + (stageTotals.active[stage] || 0), 0) - totalOffers);
-
-            // Calculate rates
-            const processedToScheduled = calculatePercentage(scheduled, totalApplicants);
-            const l1NoShowRate = calculatePercentage(noShow, scheduled);
-            const l1RejectionRate = calculatePercentage(l1Reject, scheduled);
-            const l2RejectionRate = calculatePercentage(l2Rejected, l2Scheduled);
-            const offerPercentage = calculatePercentage(offer, scheduled);
-            
-            // Calculate stage-wise conversion rates
-            const stageConversionRates: StageConversionRates = {};
-            
-            // For each stage, calculate selection and rejection rates
-            allStages.forEach((stage, index) => {
-                const selection = allStages.slice(allStages.indexOf(stage) + 1).reduce((sum, stage) => sum + (stageTotals.active[stage] || 0), 0) + allStages.slice(allStages.indexOf(stage) + 1).reduce((sum, stage) => sum + (stageTotals.rejected[stage] || 0), 0);
-                const rejection = stageTotals.rejected[stage] || 0;
-                const total = selection + rejection;
-                let selectionRate = "0%";
-                let rejectionRate = "0%";
-
-                selectionRate = calculatePercentage(selection, total);                
-                rejectionRate = calculatePercentage(rejection, total);
-                console.log("stage", stage, "selectionRate", selectionRate, "rejectionRate", rejectionRate, "total", total);
-
-                stageConversionRates[stage] = {
-                    selectionRate: selectionRate,
-                    rejectionRate: rejectionRate,
+            for (const monthData of months) {
+                let stageTotals = {
+                    active: {} as { [key: string]: number },
+                    rejected: {} as { [key: string]: number }
                 };
-            });
 
-            monthlyData.push({
-                month: monthData.month,
-                totalApplicants,
-                processed,
-                scheduled,
-                attended,
-                l1Select,
-                l1Reject,
-                noShow,
-                l2Scheduled,
-                l2Selected,
-                l2Rejected,
-                offer,
-                processedToScheduled,
-                l1NoShowRate,
-                l1RejectionRate,
-                l2RejectionRate,
-                offerPercentage,
-                channelData,
-                pipelineStages,
-                totalRejected,
-                activePipeline,
-                totalOffers,
-                stageConversionRates
+                try {
+                    // Fetch data for this job and month
+                    const [activeData, rejectedData] = await Promise.all([
+                        fetchStageData(job.JobId, monthData.startDate, monthData.endDate, -1),
+                        fetchStageData(job.JobId, monthData.startDate, monthData.endDate, 1)
+                    ]);
+
+                    stageTotals = aggregateStageData(activeData, rejectedData);
+                    
+                    // Fetch source data for this job
+                    const channelData: ChannelData[] = [];
+                    for (const source of sourceTypes) {
+                        // Fetch active candidates
+                        const activeSourceCount = await fetchSourceData(
+                            job.JobId,
+                            monthData.startDate,
+                            monthData.endDate,
+                            source.SourceCategory,
+                            source.SourceName,
+                            -1
+                        );
+
+                        // Fetch rejected candidates
+                        const rejectedSourceCount = await fetchSourceData(
+                            job.JobId,
+                            monthData.startDate,
+                            monthData.endDate,
+                            source.SourceCategory,
+                            source.SourceName,
+                            1
+                        );
+
+                        channelData.push({
+                            name: source.SourceName.charAt(0).toUpperCase() + source.SourceName.slice(1),
+                            value: activeSourceCount + rejectedSourceCount,
+                            active: activeSourceCount,
+                            rejected: rejectedSourceCount,
+                            percentage: "0%" // Will be calculated in UI
+                        });
+                    }
+
+                    // Create pipeline stages array
+                    const pipelineStages: PipelineStage[] = Object.entries(stageMapping).map(([_, stageName]) => ({
+                        stage: stageName,
+                        active: stageTotals.active[stageName] || 0,
+                        rejected: stageTotals.rejected[stageName] || 0
+                    }));
+
+                    // Calculate metrics for this job
+                    const totalApplicants = allStages.reduce((sum, stage) => 
+                        sum + (stageTotals.active[stage] || 0) + (stageTotals.rejected[stage] || 0), 0);
+                    
+                    const l1toHireActive = l1ScheduleStages.reduce((sum, stage) => 
+                        sum + (stageTotals.active[stage] || 0), 0);
+                    const l1toHireRejected = l1ScheduleStages.reduce((sum, stage) => 
+                        sum + (stageTotals.rejected[stage] || 0), 0);
+                    
+                    const l1Reject = stageTotals.rejected[EStage.L1_Interview] || 0;
+                    const l2Rejected = stageTotals.rejected[EStage.L2_Interview] || 0;
+
+                    const processed = (stageTotals.active[EStage.Pool] || 0) + 
+                        (stageTotals.active[EStage.HR_Screening] || 0) + 
+                        (stageTotals.rejected[EStage.Pool] || 0) + 
+                        (stageTotals.rejected[EStage.HR_Screening] || 0);
+                    
+                    const scheduled = l1toHireActive + l1toHireRejected;
+                    const attended = scheduled - (stageTotals.active[EStage.L1_Interview] || 0);
+                    const noShow = scheduled - attended;
+
+                    const l2Selected = l2SelectStages.reduce((sum, stage) => 
+                        sum + (stageTotals.active[stage] || 0), 0);
+                    
+                    const l1Select = l2Selected + 
+                        (stageTotals.active[EStage.L2_Interview] || 0) + 
+                        (stageTotals.rejected[EStage.L2_Interview] || 0);
+                    
+                    const l2Scheduled = l1Select;
+
+                    const totalRejected = allStages.reduce((sum, stage) => 
+                        sum + (stageTotals.rejected[stage] || 0), 0);
+                    
+                    const offer = (stageTotals.active[EStage.Offer] || 0);
+                    const totalOffers = (stageTotals.active[EStage.Offer] || 0) + 
+                        (stageTotals.active[EStage.Nurturing_Campaign] || 0) + 
+                        (stageTotals.active[EStage.Hired] || 0);
+                    
+                    const activePipeline = Math.abs(allStages.reduce((sum, stage) => 
+                        sum + (stageTotals.active[stage] || 0), 0) - totalOffers);
+
+                    // Calculate rates
+                    const processedToScheduled = calculatePercentage(scheduled, totalApplicants);
+                    const l1NoShowRate = calculatePercentage(noShow, scheduled);
+                    const l1RejectionRate = calculatePercentage(l1Reject, scheduled);
+                    const l2RejectionRate = calculatePercentage(l2Rejected, l2Scheduled);
+                    const offerPercentage = calculatePercentage(offer, scheduled);
+                    
+                    // Calculate stage-wise conversion rates
+                    const stageConversionRates: StageConversionRates = {};
+                    
+                    allStages.forEach((stage) => {
+                        const selection = allStages.slice(allStages.indexOf(stage) + 1).reduce((sum, nextStage) => 
+                            sum + (stageTotals.active[nextStage] || 0) + (stageTotals.rejected[nextStage] || 0), 0);
+                        
+                        const rejection = stageTotals.rejected[stage] || 0;
+                        const total = selection + rejection;
+                        
+                        stageConversionRates[stage] = {
+                            selectionRate: calculatePercentage(selection, total),
+                            rejectionRate: calculatePercentage(rejection, total),
+                        };
+                    });
+
+                    // Store the monthly data for this job
+                    jobMonthlyData[monthData.month] = {
+                        month: monthData.month,
+                        totalApplicants,
+                        processed,
+                        scheduled,
+                        attended,
+                        l1Select,
+                        l1Reject,
+                        noShow,
+                        l2Scheduled,
+                        l2Selected,
+                        l2Rejected,
+                        offer,
+                        processedToScheduled,
+                        l1NoShowRate,
+                        l1RejectionRate,
+                        l2RejectionRate,
+                        offerPercentage,
+                        channelData,
+                        pipelineStages,
+                        totalRejected,
+                        activePipeline,
+                        totalOffers,
+                        stageConversionRates
+                    };
+
+                } catch (error) {
+                    console.error(`Error fetching data for job ${job.JobId} and month ${monthData.month}:`, error);
+                }
+                
+                // Add delay between months to prevent rate limiting
+                await delay(500);
+            }
+            
+            // Cache the job data
+            jobDataCache.set(job.JobId, {
+                data: jobMonthlyData,
+                timestamp: Date.now()
             });
+            
+            // Add delay between jobs to prevent rate limiting
+            await delay(1000);
         }
-        return { data: monthlyData };
+        
+        // Return empty data array - the page will get data from cache
+        return { data: [] };
     } catch (error: unknown) {
         if (axios.isAxiosError(error)) {
             const status = error.response?.status || 500;
@@ -749,4 +837,142 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
             error: { status: 500, message: 'Unknown error occurred' }
         };
     }
-} 
+}
+
+// Add a function to combine data from multiple jobs
+export function combineJobsData(jobIds: string[]): MonthlyData[] {
+    const monthlyData: MonthlyData[] = [];
+    const monthsMap: { [month: string]: MonthlyData[] } = {};
+    
+    // Collect data for each job by month
+    for (const jobId of jobIds) {
+        const jobData = getJobDataFromCache(jobId);
+        if (!jobData) continue;
+        
+        Object.entries(jobData).forEach(([month, data]) => {
+            if (!monthsMap[month]) {
+                monthsMap[month] = [];
+            }
+            monthsMap[month].push(data);
+        });
+    }
+    
+    // Combine data for each month
+    Object.entries(monthsMap).forEach(([month, jobsData]) => {
+        if (jobsData.length === 0) return;
+        
+        // Use the first job's data as a base
+        const baseData = { ...jobsData[0] };
+        
+        if (jobsData.length === 1) {
+            monthlyData.push(baseData);
+            return;
+        }
+        
+        // Combine data from all jobs
+        const combinedData: MonthlyData = {
+            ...baseData,
+            totalApplicants: jobsData.reduce((sum, job) => sum + job.totalApplicants, 0),
+            processed: jobsData.reduce((sum, job) => sum + job.processed, 0),
+            scheduled: jobsData.reduce((sum, job) => sum + job.scheduled, 0),
+            attended: jobsData.reduce((sum, job) => sum + job.attended, 0),
+            l1Select: jobsData.reduce((sum, job) => sum + job.l1Select, 0),
+            l1Reject: jobsData.reduce((sum, job) => sum + job.l1Reject, 0),
+            noShow: jobsData.reduce((sum, job) => sum + job.noShow, 0),
+            l2Scheduled: jobsData.reduce((sum, job) => sum + job.l2Scheduled, 0),
+            l2Selected: jobsData.reduce((sum, job) => sum + job.l2Selected, 0),
+            l2Rejected: jobsData.reduce((sum, job) => sum + job.l2Rejected, 0),
+            offer: jobsData.reduce((sum, job) => sum + job.offer, 0),
+            totalRejected: jobsData.reduce((sum, job) => sum + job.totalRejected, 0),
+            totalOffers: jobsData.reduce((sum, job) => sum + job.totalOffers, 0),
+            activePipeline: jobsData.reduce((sum, job) => sum + job.activePipeline, 0),
+            
+            // Combine pipeline stages
+            pipelineStages: baseData.pipelineStages.map((stage, index) => ({
+                ...stage,
+                active: jobsData.reduce((sum, job) => sum + (job.pipelineStages[index]?.active || 0), 0),
+                rejected: jobsData.reduce((sum, job) => sum + (job.pipelineStages[index]?.rejected || 0), 0),
+            })),
+            
+            // Combine channel data
+            channelData: baseData.channelData.map((channel, index) => {
+                const totalValue = jobsData.reduce((sum, job) => sum + (job.channelData[index]?.value || 0), 0);
+                const totalActive = jobsData.reduce((sum, job) => sum + (job.channelData[index]?.active || 0), 0);
+                const totalRejected = jobsData.reduce((sum, job) => sum + (job.channelData[index]?.rejected || 0), 0);
+                const totalApplicants = jobsData.reduce((sum, job) => sum + job.totalApplicants, 0);
+                
+                return {
+                    ...channel,
+                    value: totalValue,
+                    active: totalActive,
+                    rejected: totalRejected,
+                    percentage: calculatePercentage(totalValue, totalApplicants)
+                };
+            }),
+            
+            // Recalculate rates
+            processedToScheduled: calculatePercentage(
+                jobsData.reduce((sum, job) => sum + job.scheduled, 0),
+                jobsData.reduce((sum, job) => sum + job.totalApplicants, 0)
+            ),
+            l1NoShowRate: calculatePercentage(
+                jobsData.reduce((sum, job) => sum + job.noShow, 0),
+                jobsData.reduce((sum, job) => sum + job.scheduled, 0)
+            ),
+            l1RejectionRate: calculatePercentage(
+                jobsData.reduce((sum, job) => sum + job.l1Reject, 0),
+                jobsData.reduce((sum, job) => sum + job.scheduled, 0)
+            ),
+            l2RejectionRate: calculatePercentage(
+                jobsData.reduce((sum, job) => sum + job.l2Rejected, 0),
+                jobsData.reduce((sum, job) => sum + job.l2Scheduled, 0)
+            ),
+            offerPercentage: calculatePercentage(
+                jobsData.reduce((sum, job) => sum + job.offer, 0),
+                jobsData.reduce((sum, job) => sum + job.scheduled, 0)
+            ),
+            
+            // Combine stage conversion rates
+            stageConversionRates: combineStageConversionRates(jobsData)
+        };
+        
+        monthlyData.push(combinedData);
+    });
+    
+    // Sort by month (most recent first)
+    return monthlyData.sort((a, b) => {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return months.indexOf(b.month) - months.indexOf(a.month);
+    });
+}
+
+// Helper function to combine stage conversion rates
+function combineStageConversionRates(jobsData: MonthlyData[]): StageConversionRates {
+    const combinedRates: StageConversionRates = {};
+    
+    allStages.forEach(stage => {
+        // Calculate combined selection rate
+        const selectionRates = jobsData
+            .map(job => job.stageConversionRates[stage]?.selectionRate || '0%')
+            .map(rate => parseInt(rate) || 0);
+        
+        const avgSelection = selectionRates.reduce((sum, rate) => sum + rate, 0) / selectionRates.length;
+        
+        // Calculate combined rejection rate
+        const rejectionRates = jobsData
+            .map(job => job.stageConversionRates[stage]?.rejectionRate || '0%')
+            .map(rate => parseInt(rate) || 0);
+        
+        const avgRejection = rejectionRates.reduce((sum, rate) => sum + rate, 0) / rejectionRates.length;
+        
+        combinedRates[stage] = {
+            selectionRate: `${Math.round(avgSelection)}%`,
+            rejectionRate: `${Math.round(avgRejection)}%`
+        };
+    });
+    
+    return combinedRates;
+}
+
+// Export the refreshToken function
+export { testApiToken }; 

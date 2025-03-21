@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsivePie } from "@nivo/pie";
 import { useState, useMemo } from "react";
-import { generateMonthlyData } from '@/utils/dataFetcher';
+import { generateMonthlyData, getJobDataFromCache, combineJobsData } from '@/utils/dataFetcher';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -307,24 +307,58 @@ export default function Dashboard() {
   // Add this state for token management
   const [apiToken, setApiToken] = useState<string>('');
   const [showTokenModal, setShowTokenModal] = useState(false);
+  
+  // Add a state to track if initial data has been loaded
+  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
 
   // Define allStages here
   const allStages = Object.values(EStage);
 
-  // Create a function to fetch data that can be called after token is submitted
+  // Modify the useEffect hook to only load data once
+  React.useEffect(() => {
+    const token = sessionStorage.getItem('apiToken');
+    if (token) {
+      setApiToken(token);
+      if (!initialDataLoaded) {
+        // Only fetch data on initial load
+        fetchDashboardData(token);
+      } else {
+        // Just update the displayed data based on selected jobs
+        updateDisplayedData();
+      }
+    } else {
+      setShowTokenModal(true);
+    }
+  }, [initialDataLoaded]); // Remove selectedJobs dependency
+
+  // Add a separate effect to update displayed data when selections change
+  React.useEffect(() => {
+    if (initialDataLoaded) {
+      updateDisplayedData();
+    }
+  }, [selectedJobs, selectedMonth, initialDataLoaded]);
+
+  // Function to update displayed data without API calls
+  const updateDisplayedData = () => {
+    // Combine data from cache for selected jobs
+    const combinedData = combineJobsData(selectedJobs);
+    setMonthlyData(combinedData);
+  };
+
+  // Modify the fetchDashboardData function
   const fetchDashboardData = async (token: string) => {
     try {
       setIsLoading(true);
       setError(null);
-      // Pass the selected jobs to the generateMonthlyData function
-      const data = await generateMonthlyData(jobs.filter(job => selectedJobs.includes(job.JobId)), token);
-      if (data.error?.status === 401) {
-        setError(data.error.message);
-        sessionStorage.removeItem('apiToken');
-        setApiToken('');
-      } else if (data.data.length > 0) {
-        setMonthlyData(data.data);
-      }
+      
+      // Fetch data for all jobs once
+      await generateMonthlyData(jobs, token);
+      
+      // After fetching, combine from cache based on selected jobs
+      updateDisplayedData();
+      
+      // Mark initial data as loaded
+      setInitialDataLoaded(true);
     } catch (err) {
       setError('Failed to fetch data');
       console.error('Failed to fetch data:', err);
@@ -332,17 +366,6 @@ export default function Dashboard() {
       setIsLoading(false);
     }
   };
-
-  // Add useEffect to load data when component mounts or when selectedJobs changes
-  React.useEffect(() => {
-    const token = sessionStorage.getItem('apiToken');
-    if (token) {
-      setApiToken(token);
-      fetchDashboardData(token);
-    } else {
-      setShowTokenModal(true);
-    }
-  }, [selectedJobs]); // Add selectedJobs as a dependency
 
   // Add the AuthTokenModal component
   const AuthTokenModal = () => {
@@ -440,14 +463,14 @@ export default function Dashboard() {
           const totalValue = monthlyData.reduce((sum, month) => sum + month.channelData[index].value, 0);
           const totalActive = monthlyData.reduce((sum, month) => sum + month.channelData[index].active, 0);
           const totalRejected = monthlyData.reduce((sum, month) => sum + month.channelData[index].rejected, 0);
-          const totalProcessed = monthlyData.reduce((sum, month) => sum + month.processed, 0);
+          const totalApplicants = monthlyData.reduce((sum, month) => sum + month.totalApplicants, 0);
 
           return {
             ...channel,
             value: totalValue,
             active: totalActive,
             rejected: totalRejected,
-            percentage: `${Math.round((totalValue / totalProcessed) * 100)}%`
+            percentage: `${Math.round((totalValue / totalApplicants) * 100)}%`
           };
         })
       };
