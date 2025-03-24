@@ -3,15 +3,20 @@
 import { Card } from "@/components/ui/card";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsivePie } from "@nivo/pie";
-import { useState, useMemo } from "react";
-import { generateMonthlyData, getJobDataFromCache, combineJobsData } from '@/utils/dataFetcher';
+import { useState, useMemo, useEffect, useCallback } from "react";
+import { generateDashboardData, testApiToken, stageMapping } from '@/utils/dataFetcher';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { FiCalendar } from 'react-icons/fi';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import React from 'react';
 import { EStage } from "@/types/dashboard";
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, ChevronDown, Settings, BarChart } from 'lucide-react';
+import ReferralDashboard from '@/components/ReferralDashboard';
+import CandidateDetailsModal from '@/components/CandidateDetailsModal';
+import ApiTokenSettings from '@/components/ApiTokenSettings';
+import JobFilter from '@/components/JobFilter';
 
 // Define types for better type safety
 interface ChannelData {
@@ -59,6 +64,94 @@ interface MonthlyData {
   };
 }
 
+// Add new interfaces for candidate data
+interface CandidateData {
+  UserData: {
+    Name: string;
+    EmailId: string;
+    PhoneNumber: string;
+    EducationList: {
+      InstituteName: string;
+      Degree: string;
+      EndYear: number;
+    }[];
+  };
+  WorkData: {
+    WorkDataList: {
+      CompanyName: string;
+      Role: string;
+      StartDate: {
+        Month: number;
+        Day: number;
+        Year: number;
+      };
+      EndDate: {
+        Month: number;
+        Day: number;
+        Year: number;
+      };
+    }[];
+    TotalExperience: number;
+  };
+  Source: {
+    SourceCategory: string;
+    SourceDrillDown1: string;
+    SourceDrillDown2: string;
+  };
+  ResumeStage: {
+    Name: string;
+    Value: number;
+  };
+  Parent: {
+    Name: string;
+    JobCode: string;
+    ParentId: string;
+  };
+  ResumeUrl: string;
+  UploadDateTime: string;
+}
+
+interface DashboardData {
+  monthlyData: MonthlyData[];
+  jobData: { [jobId: string]: { name: string, code: string } };
+  candidatesByStage: { 
+    [month: string]: {
+      [stage: string]: string[] 
+    } 
+  };
+  candidatesByChannel: {
+    [month: string]: {
+      [channel: string]: string[] 
+    }
+  };
+  referralData: {
+    summary: {
+      month: string;
+      totalReferrals: number;
+      referrers: {
+        name: string;
+        count: number;
+        percentage: string;
+        candidates: string[];
+      }[];
+      stages: {
+        stage: string;
+        count: number;
+        percentage: string;
+        candidates: string[];
+      }[];
+      conversionRate: string;
+    }[];
+    topReferrers: {
+      name: string;
+      count: number;
+      percentage: string;
+      candidates: string[];
+    }[];
+  };
+  candidateData: { [resumeId: string]: CandidateData };
+}
+
 // Update the chart theme with a more modern color palette inspired by the examples
 const chartTheme = {
   axis: {
@@ -104,9 +197,13 @@ interface ChannelColors {
 
 const channelColors: ChannelColors = {
   "Naukri": "#f59e0b",    // Amber
+  "LinkedIn": "#0077b5",  // LinkedIn blue
   "Referral": "#3b82f6",  // Blue
   "Vendor": "#10b981",    // Emerald
-  "Linkedin": "#0077b5"   // LinkedIn blue
+  "Career Page": "#8b5cf6", // Purple
+  "JobBoards": "#f43f5e",  // Rose
+  "RecruitmentPartners": "#14b8a6", // Teal
+  "Unknown": "#6b7280"    // Gray
 };
 
 // Add this helper function to get months till current date
@@ -297,897 +394,1045 @@ const jobs = [
   { "JobId": "cc558d28-9c23-4ccb-921c-feac9f91ae63", "JobName": "LegacyLeap" }
 ];
 
+
+
+// Define the order for proper pipeline visualization
+const pipelineStageOrder = {
+  "Pool": 1,
+  "HR Screening": 2,
+  "Xobin Test": 3,
+  "L1 Interview": 4,
+  "L2 Interview": 5,
+  "Final Round": 6,
+  "HR Round": 7,
+  "Pre Offer Documentation": 8,
+  "Offer Approval": 9,
+  "Offer": 10,
+  "Nurturing Campaign": 11,
+  "Hired": 12,
+  // "Reject": 13
+};
+
 export default function Dashboard() {
   const [selectedMonth, setSelectedMonth] = useState<string>('All');
-  const [selectedJobs, setSelectedJobs] = useState<string[]>(jobs.map(job => job.JobId)); // Initialize with all jobs
-  const [monthlyData, setMonthlyData] = useState<MonthlyData[]>([]);
-  const [isLoading, setIsLoading] = useState(false);
+  const [selectedJobs, setSelectedJobs] = useState<string[]>([]);
+  const [dashboardData, setDashboardData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
-
-  // Add this state for token management
-  const [apiToken, setApiToken] = useState<string>('');
-  const [showTokenModal, setShowTokenModal] = useState(false);
+  const [activeTab, setActiveTab] = useState<string>('overview');
   
-  // Add a state to track if initial data has been loaded
-  const [initialDataLoaded, setInitialDataLoaded] = useState(false);
+  // Modal state for candidate details
+  const [modalOpen, setModalOpen] = useState<boolean>(false);
+  const [selectedCandidates, setSelectedCandidates] = useState<CandidateData[]>([]);
+  const [modalTitle, setModalTitle] = useState<string>('Candidate Details');
 
-  // Define allStages here
-  const allStages = Object.values(EStage);
+  // Add these state variables to your Dashboard component
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [apiTokenSet, setApiTokenSet] = useState(false);
 
-  // Modify the useEffect hook to only load data once
-  React.useEffect(() => {
-    const token = sessionStorage.getItem('apiToken');
-    if (token) {
-      setApiToken(token);
-      if (!initialDataLoaded) {
-        // Only fetch data on initial load
-        fetchDashboardData(token);
-      } else {
-        // Just update the displayed data based on selected jobs
-        updateDisplayedData();
-      }
-    } else {
-      setShowTokenModal(true);
+  // Update the fetchData function to properly handle the API flow
+  const fetchData = async () => {
+    setLoading(true);
+    setError(null);
+    
+    const token = localStorage.getItem('turbohire_api_token');
+    
+    if (!token) {
+      setLoading(false);
+      setError('API token is missing. Please set it in the settings.');
+      return;
     }
-  }, [initialDataLoaded]); // Remove selectedJobs dependency
-
-  // Add a separate effect to update displayed data when selections change
-  React.useEffect(() => {
-    if (initialDataLoaded) {
-      updateDisplayedData();
-    }
-  }, [selectedJobs, selectedMonth, initialDataLoaded]);
-
-  // Function to update displayed data without API calls
-  const updateDisplayedData = () => {
-    // Combine data from cache for selected jobs
-    const combinedData = combineJobsData(selectedJobs);
-    setMonthlyData(combinedData);
-  };
-
-  // Modify the fetchDashboardData function
-  const fetchDashboardData = async (token: string) => {
+    
     try {
-      setIsLoading(true);
-      setError(null);
+      // First test if the token is valid
+      const tokenTest = await testApiToken(token);
       
-      // Fetch data for all jobs once
-      await generateMonthlyData(jobs, token);
+      if (!tokenTest.success) {
+        // If token test failed, show error
+        setError('API token is invalid. Please update it in settings.');
+        setLoading(false);
+        return;
+      }
       
-      // After fetching, combine from cache based on selected jobs
-      updateDisplayedData();
-      
-      // Mark initial data as loaded
-      setInitialDataLoaded(true);
+      // If token is valid, fetch dashboard data
+      const result = await generateDashboardData(token);
+      if (result.error) {
+        setError(`Error: ${result.error.message}`);
+      } else if (result.data) {
+        setDashboardData(result.data);
+        console.log('Dashboard data loaded:', result.data);
+      } else {
+        setError('No data returned from API');
+      }
     } catch (err) {
-      setError('Failed to fetch data');
-      console.error('Failed to fetch data:', err);
+      console.error('Error fetching dashboard data:', err);
+      setError('Failed to fetch dashboard data');
     } finally {
-      setIsLoading(false);
+      setLoading(false);
     }
   };
+  
+  // Make sure we fetch data when the component mounts
+  useEffect(() => {
+    const token = localStorage.getItem('turbohire_api_token');
+    setApiTokenSet(!!token);
+    
+    if (token) {
+      fetchData();
+    }
+  }, []);
 
-  // Add the AuthTokenModal component
-  const AuthTokenModal = () => {
-    const [token, setToken] = useState(apiToken || '');
-    const [isSubmitting, setIsSubmitting] = useState(false);
-
-    const handleSubmit = async (e: React.FormEvent) => {
-      e.preventDefault();
-      setIsSubmitting(true);
-
-      // Update the token state
-      setApiToken(token);
-
-      // Close the modal
-      setShowTokenModal(false);
-
-      // Fetch data with the new token
-      await fetchDashboardData(token);
-
-      setIsSubmitting(false);
-    };
-
-    return (
-      <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div className="bg-white rounded-lg shadow-lg p-6 w-full max-w-md">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold text-gray-900">Enter API Token</h2>
-            <button
-              onClick={() => setShowTokenModal(false)}
-              className="text-gray-500 hover:text-gray-700"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
-              </svg>
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmit}>
-            <div className="mb-4">
-              <label htmlFor="token" className="block text-sm font-medium text-gray-700 mb-1">
-                API Token
-              </label>
-              <input
-                type="text"
-                id="token"
-                value={token}
-                onChange={(e) => setToken(e.target.value)}
-                className="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Enter your API token"
-                required
-              />
-            </div>
-
-            <div className="flex justify-end">
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 disabled:opacity-50"
-              >
-                {isSubmitting ? 'Submitting...' : 'Submit'}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
+  // Handle candidate click
+  const handleCandidateClick = (resumeIds: string[], title: string = 'Candidate Details') => {
+    if (!dashboardData || !resumeIds.length) return;
+    
+    const candidates = resumeIds
+      .map(id => dashboardData.candidateData[id])
+      .filter(Boolean);
+    
+    setSelectedCandidates(candidates);
+    setModalTitle(title);
+    setModalOpen(true);
   };
 
-  const currentMonthData = useMemo(() => {
-    if (selectedMonth === 'All') {
-      if (!monthlyData.length) return null;
-
-      const combinedData = {
-        ...monthlyData[0],
-        totalApplicants: monthlyData.reduce((sum, month) => sum + month.totalApplicants, 0),
-        processed: monthlyData.reduce((sum, month) => sum + month.processed, 0),
-        scheduled: monthlyData.reduce((sum, month) => sum + month.scheduled, 0),
-        attended: monthlyData.reduce((sum, month) => sum + month.attended, 0),
-        l1Select: monthlyData.reduce((sum, month) => sum + month.l1Select, 0),
-        l1Reject: monthlyData.reduce((sum, month) => sum + month.l1Reject, 0),
-        noShow: monthlyData.reduce((sum, month) => sum + month.noShow, 0),
-        l2Scheduled: monthlyData.reduce((sum, month) => sum + month.l2Scheduled, 0),
-        l2Selected: monthlyData.reduce((sum, month) => sum + month.l2Selected, 0),
-        l2Rejected: monthlyData.reduce((sum, month) => sum + month.l2Rejected, 0),
-        offer: monthlyData.reduce((sum, month) => sum + month.offer, 0),
-        totalRejected: monthlyData.reduce((sum, month) => sum + month.totalRejected, 0),
-        totalOffers: monthlyData.reduce((sum, month) => sum + month.totalOffers, 0),
-        activePipeline: monthlyData.reduce((sum, month) => sum + month.activePipeline, 0),
-        pipelineStages: monthlyData[0].pipelineStages.map((stage, index) => ({
-          ...stage,
-          active: monthlyData.reduce((sum, month) => sum + month.pipelineStages[index].active, 0),
-          rejected: monthlyData.reduce((sum, month) => sum + month.pipelineStages[index].rejected, 0),
+  // Update the filteredData useMemo to properly filter based on selected jobs
+  const filteredData = useMemo(() => {
+    if (!dashboardData) return null;
+    
+    // If no jobs selected, return all data
+    if (selectedJobs.length === 0) {
+      return dashboardData;
+    }
+    
+    // Filter candidates by selected jobs
+    const filteredCandidateData = Object.entries(dashboardData.candidateData)
+      .filter(([_, candidate]) => {
+        // Check if the candidate's job is in the selected jobs list
+        return selectedJobs.includes(candidate.Parent?.ParentId);
+      })
+      .reduce((acc, [id, candidate]) => {
+        acc[id] = candidate;
+        return acc;
+      }, {} as typeof dashboardData.candidateData);
+    
+    // Calculate new monthly data based on filtered candidates
+    const monthlyDataMap = new Map();
+    
+    // Initialize with existing months
+    dashboardData.monthlyData.forEach(monthData => {
+      monthlyDataMap.set(monthData.month, {
+        ...monthData,
+        totalApplicants: 0,
+        totalRejected: 0,
+        totalOffers: 0,
+        activePipeline: 0,
+        channelData: [...monthData.channelData].map(channel => ({
+          ...channel,
+          value: 0,
+          active: 0,
+          rejected: 0
         })),
-        channelData: monthlyData[0].channelData.map((channel, index) => {
-          const totalValue = monthlyData.reduce((sum, month) => sum + month.channelData[index].value, 0);
-          const totalActive = monthlyData.reduce((sum, month) => sum + month.channelData[index].active, 0);
-          const totalRejected = monthlyData.reduce((sum, month) => sum + month.channelData[index].rejected, 0);
-          const totalApplicants = monthlyData.reduce((sum, month) => sum + month.totalApplicants, 0);
+        pipelineStages: [...monthData.pipelineStages].map(stage => ({
+          ...stage,
+          active: 0,
+          rejected: 0
+        }))
+      });
+    });
+    
+    // Count candidates for each month
+    Object.values(filteredCandidateData).forEach(candidate => {
+      // Extract month from upload date
+      const uploadDate = new Date(candidate.UploadDateTime);
+      const month = uploadDate.toLocaleString('default', { month: 'short' });
+      
+      if (!monthlyDataMap.has(month)) return;
+      
+      const monthData = monthlyDataMap.get(month);
+      
+      // Increment total applicants
+      monthData.totalApplicants++;
+      
+      // Get the stage name from the mapping
+      const stageName = stageMapping[candidate.ResumeStage.Value.toString()] || "Unknown";
+      const status = candidate.ResumeStage.Value;
+      const previousStatus = candidate.ResumeStage?.PreviousStatus;
+      // Update pipeline stages
+      if (status === 1) { // This is a rejected candidate
+        // Find the previous stage where the candidate was rejected
+        const previousStageName = stageMapping[previousStatus] || "Pool";
+        
+        // Find or create the previous stage in our pipeline data
+        let previousStageIndex = monthData.pipelineStages.findIndex(s => s.stage === previousStageName);
+        if (previousStageIndex === -1) {
+          // If stage doesn't exist yet, add it
+          monthData.pipelineStages.push({
+            stage: previousStageName,
+            active: 0,
+            rejected: 0
+          });
+          previousStageIndex = monthData.pipelineStages.length - 1;
+        }
+        
+        // Increment rejected count for the previous stage
+        monthData.pipelineStages[previousStageIndex].rejected++;
+        monthData.totalRejected++;
+      } else {
+        // This is an active candidate - use your existing logic for active candidates
+        let stageIndex = monthData.pipelineStages.findIndex(s => s.stage === stageName);
+        if (stageIndex === -1) {
+          // If stage doesn't exist yet, add it
+          monthData.pipelineStages.push({
+            stage: stageName,
+            active: 0,
+            rejected: 0
+          });
+          stageIndex = monthData.pipelineStages.length - 1;
+        }
+        
+        // Increment active count for the current stage
+        monthData.pipelineStages[stageIndex].active++;
+        
+        // Your existing logic for counting offers and active pipeline
+        if (["Offer", "Nurturing Campaign", "Hired"].includes(stageName)) {
+          monthData.totalOffers++;
+        } else {
+          monthData.activePipeline++;
+        }
+      }
+    });
+    
+    // Convert map back to array
+    const filteredMonthlyData = Array.from(monthlyDataMap.values());
+    
+    return {
+      ...dashboardData,
+      candidateData: filteredCandidateData,
+      monthlyData: filteredMonthlyData
+    };
+  }, [dashboardData, selectedJobs]);
 
-          return {
-            ...channel,
-            value: totalValue,
-            active: totalActive,
-            rejected: totalRejected,
-            percentage: `${Math.round((totalValue / totalApplicants) * 100)}%`
-          };
-        })
-      };
-      return combinedData;
+  // Update the filteredMonthlyData variable to use the filtered data
+  const filteredMonthlyData = useMemo(() => {
+    if (!filteredData) return [];
+    
+    if (selectedMonth === 'All') {
+      return filteredData.monthlyData;
     }
-    return monthlyData.find(data => data.month === selectedMonth) || null;
-  }, [selectedMonth, monthlyData]);
+    
+    return filteredData.monthlyData.filter(item => item.month === selectedMonth);
+  }, [filteredData, selectedMonth]);
 
-  // Add this function before the return statement in the Dashboard component
-  const exportStageConversionRates = () => {
-    if (!monthlyData.length) return;
+  // Update the pipelineChartData to use filtered data and proper ordering
+  const pipelineChartData = useMemo(() => {
+    if (filteredMonthlyData.length) {
+      // Use the most recent month's data for the pipeline chart
+      const latestMonth = filteredMonthlyData[filteredMonthlyData.length - 1];
+    
+      // Sort stages based on the pipelineStageOrder
+      return latestMonth.pipelineStages
+        .map(stage => ({
+          stage: stage.stage,
+          active: stage.active,
+          rejected: stage.rejected,
+          order: pipelineStageOrder[stage.stage] || 999 // Use 999 for unknown stages
+        }))
+        .sort((a, b) => a.order - b.order) // Sort by the order
+        .map(({ stage, active, rejected }) => ({ stage, active, rejected })); // Remove the order property
+    }
+    
+    return []; // Return empty array if no data
+  }, [filteredMonthlyData]);
 
-    const headers = [
-      'Month',
-      'Metric',
-      'Pool',
-      'HR Screening',
-      'Xobin Test',
-      'L1 Interview',
-      'L2 Interview',
-      'Final Round',
-      'HR Round',
-      'Pre Offer Doc',
-      'Offer Approval',
-      'Offer',
-      'Nurturing Campaign',
-      'Hired'
+  // Restore the original channelChartData calculation
+  const channelChartData = useMemo(() => {
+    // Check if we have filtered data
+    if (!filteredData || !filteredData.candidatesByChannel) {
+      return [];
+    }
+    
+    // Create a map to aggregate channel data
+    const channelMap = {};
+    
+    // Process each month's data
+    Object.entries(filteredData.candidatesByChannel).forEach(([month, channels]) => {
+      // Process each channel in this month
+      Object.entries(channels).forEach(([channelName, candidateIds]) => {
+        // Filter candidates by selected jobs if any are selected
+        const relevantCandidates = candidateIds.filter(id => {
+          const candidate = filteredData.candidateData[id];
+          // If no jobs are selected, include all candidates
+          if (!selectedJobs.length) return true;
+          // Otherwise, only include candidates from selected jobs
+          return candidate && selectedJobs.includes(candidate.Parent.ParentId);
+        });
+        
+        // Skip if no relevant candidates after filtering
+        if (relevantCandidates.length === 0) return;
+        
+        // Determine display name based on source type logic
+        let displayName = channelName;
+        
+        // Format specific source names
+        if (channelName === "naukri") displayName = "Naukri";
+        if (channelName === "linkedin") displayName = "LinkedIn";
+        if (channelName === "referral") displayName = "Referral";
+        if (channelName === "CareerPage") displayName = "Career Page";
+        
+        // Initialize or update the channel in our map
+        if (!channelMap[displayName]) {
+          channelMap[displayName] = {
+            name: displayName,
+            value: 0,
+            candidates: []
+          };
+        }
+        
+        // Add these candidates to the channel
+        channelMap[displayName].candidates.push(...relevantCandidates);
+        channelMap[displayName].value = channelMap[displayName].candidates.length;
+      });
+    });
+    
+    // Convert the map to an array for the pie chart
+    return Object.values(channelMap)
+      .filter(channel => channel.value > 0)
+      .map(channel => ({
+        id: channel.name,
+        label: channel.name,
+        value: channel.value,
+        color: channelColors[channel.name] || '#6366f1',
+      }))
+      .sort((a, b) => b.value - a.value); // Sort by value descending
+  }, [filteredData, selectedJobs]);
+
+  // Update the conversionRatesData to use filtered data
+  const conversionRatesData = useMemo(() => {
+    if (!filteredData || !filteredData.candidateData) return [];
+    
+    // Define the pipeline stages in order
+    const pipelineStages = [
+      "Pool",
+      "HR Screening",
+      "Xobin Test",
+      "L1 Interview",
+      "L2 Interview",
+      "Final Round",
+      "HR Round",
+      "Pre Offer Documentation",
+      "Offer Approval",
+      "Offer",
+      "Nurturing Campaign",
+      "Hired"
     ];
-
-    let csvContent = headers.join(',') + '\n';
-
-    // Add data for each month
-    monthlyData.forEach(data => {
-      const selectionRow = [
-        data.month,
-        'Selection Rate'
-      ];
-
-      // Add selection rates for each stage
-      Object.values(EStage).forEach(stage => {
-        selectionRow.push(data.stageConversionRates[stage]?.selectionRate || 'N/A');
-      });
-
-      csvContent += selectionRow.join(',') + '\n';
-
-      const rejectionRow = [
-        data.month,
-        'Rejection Rate'
-      ];
-
-      // Add rejection rates for each stage
-      Object.values(EStage).forEach(stage => {
-        rejectionRow.push(data.stageConversionRates[stage]?.rejectionRate || 'N/A');
-      });
-
-      csvContent += rejectionRow.join(',') + '\n';
+    
+    // Create stage data structure
+    const stageData = {};
+    pipelineStages.forEach(stage => {
+      stageData[stage] = {
+        active: 0,      // Candidates currently at this stage
+        rejected: 0,    // Candidates rejected at this stage
+        total: 0        // Total candidates who reached this stage (for calculating percentages)
+      };
     });
-
-    // Calculate and add average row
-    const avgSelectionRow = ['Average', 'Selection Rate'];
-    const avgRejectionRow = ['Average', 'Rejection Rate'];
-
-    Object.values(EStage).forEach(stage => {
-      // Calculate average selection rate
-      const selectionRates = monthlyData
-        .map(month => month.stageConversionRates[stage]?.selectionRate || '0%')
-        .map(rate => parseFloat(rate) || 0);
-      const avgSelection = selectionRates.reduce((sum, rate) => sum + rate, 0) / selectionRates.length;
-      avgSelectionRow.push(`${avgSelection.toFixed(2)}%`);
-
-      // Calculate average rejection rate
-      const rejectionRates = monthlyData
-        .map(month => month.stageConversionRates[stage]?.rejectionRate || '0%')
-        .map(rate => parseFloat(rate) || 0);
-      const avgRejection = rejectionRates.reduce((sum, rate) => sum + rate, 0) / rejectionRates.length;
-      avgRejectionRow.push(`${avgRejection.toFixed(2)}%`);
+    
+    // Count candidates at each stage
+    Object.values(filteredData.candidateData).forEach(candidate => {
+      // Skip candidates that don't match selected jobs
+      if (selectedJobs.length > 0 && !selectedJobs.includes(candidate.Parent.ParentId)) {
+        return;
+      }
+      
+      const stageValue = candidate.ResumeStage.Value.toString();
+      const stageName = stageMapping[stageValue] || "Unknown";
+      
+      // Skip unknown stages
+      if (stageName === "Unknown" || !pipelineStages.includes(stageName) && stageName !== "Reject") {
+        return;
+      }
+      
+      // For rejected candidates, increment the rejected count for their previous stage
+      if (stageName === "Reject" && candidate.ResumeStage.previousStatus) {
+        const previousStageName = stageMapping[candidate.ResumeStage.previousStatus.toString()];
+        if (previousStageName && stageData[previousStageName]) {
+          stageData[previousStageName].rejected++;
+          stageData[previousStageName].total++;
+        }
+      } 
+      // For active candidates, increment the active count for their current stage
+      else if (stageData[stageName]) {
+        stageData[stageName].active++;
+        stageData[stageName].total++;
+        
+        // Also increment the total for all previous stages
+        // This helps us track how many candidates reached each stage
+        const stageIndex = pipelineStages.indexOf(stageName);
+        for (let i = 0; i < stageIndex; i++) {
+          stageData[pipelineStages[i]].total++;
+        }
+      }
     });
+    
+    // Calculate conversion rates
+    const result = [];
+    
+    // Skip the first stage (Pool) for selection rate calculation
+    for (let i = 1; i < pipelineStages.length; i++) {
+      const currentStage = pipelineStages[i];
+      const previousStage = pipelineStages[i-1];
+      
+      // Get data for current and previous stages
+      const currentStageData = stageData[currentStage];
+      const previousStageData = stageData[previousStage];
+      
+      // Calculate selection rate: (candidates who reached this stage) / (candidates who reached previous stage)
+      const selectionRate = previousStageData.total > 0 
+        ? Math.round((currentStageData.total / previousStageData.total) * 100) 
+        : 0;
+      
+      // Calculate rejection rate: (candidates rejected at this stage) / (total candidates who reached this stage)
+      const rejectionRate = currentStageData.total > 0 
+        ? Math.round((currentStageData.rejected / currentStageData.total) * 100) 
+        : 0;
+      
+      result.push({
+        stage: currentStage,
+        selectionRate,
+        rejectionRate
+      });
+    }
+    
+    return result;
+  }, [filteredData, selectedJobs, stageMapping]);
 
-    csvContent += avgSelectionRow.join(',') + '\n';
-    csvContent += avgRejectionRow.join(',') + '\n';
+  // Update the monthlyTrendsData to use filtered data
+  const monthlyTrendsData = useMemo(() => {
+    if (filteredMonthlyData.length) {
+      return filteredMonthlyData.map(month => ({
+        month: month.month,
+        activePipeline: month.activePipeline,
+        offers: month.totalOffers,
+        rejected: month.totalRejected,
+      }));
+    }
+    
+    return []; // Return empty array if no data
+  }, [filteredMonthlyData]);
 
-    // Create and download the CSV file
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.setAttribute('href', url);
-    link.setAttribute('download', 'stage_conversion_rates.csv');
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-  };
+  // Add channelDetailData calculation without affecting the existing channelChartData
+  const channelDetailData = useMemo(() => {
+    // Check if we have filtered data
+    if (!filteredData || !filteredData.candidatesByChannel) {
+      return [];
+    }
+    
+    // Create a map to aggregate channel data
+    const channelMap = {};
+    
+    // Process each month's data
+    Object.entries(filteredData.candidatesByChannel).forEach(([month, channels]) => {
+      // Process each channel in this month
+      Object.entries(channels).forEach(([channelName, candidateIds]) => {
+        // Filter candidates by selected jobs if any are selected
+        const relevantCandidates = candidateIds.filter(id => {
+          const candidate = filteredData.candidateData[id];
+          // If no jobs are selected, include all candidates
+          if (!selectedJobs.length) return true;
+          // Otherwise, only include candidates from selected jobs
+          return candidate && selectedJobs.includes(candidate.Parent.ParentId);
+        });
+        
+        // Skip if no relevant candidates after filtering
+        if (relevantCandidates.length === 0) return;
+        
+        // Determine display name based on source type logic
+        let displayName = channelName;
+        
+        // Format specific source names
+        if (channelName === "naukri") displayName = "Naukri";
+        if (channelName === "linkedin") displayName = "LinkedIn";
+        if (channelName === "referral") displayName = "Referral";
+        if (channelName === "CareerPage") displayName = "Career Page";
+        
+        // Initialize or update the channel in our map
+        if (!channelMap[displayName]) {
+          channelMap[displayName] = {
+            name: displayName,
+            total: 0,
+            active: 0,
+            offers: 0,
+            rejected: 0,
+            candidates: []
+          };
+        }
+        
+        // Add these candidates to the channel
+        channelMap[displayName].candidates.push(...relevantCandidates);
+      });
+    });
+    
+    // Calculate metrics for each channel
+    Object.values(channelMap).forEach(channel => {
+      channel.total = channel.candidates.length;
+      
+      // Count by status
+      channel.candidates.forEach(id => {
+        const candidate = filteredData.candidateData[id];
+        if (!candidate) return;
+        
+        const stageName = stageMapping[candidate.ResumeStage.Value.toString()] || "Unknown";
+        
+        if (candidate.ResumeStage.Value === 1) {
+          channel.rejected++;
+        } else if (["Offer", "Nurturing Campaign", "Hired"].includes(stageName)) {
+          channel.offers++;
+        } else {
+          channel.active++;
+        }
+      });
+      
+      // Calculate rates
+      channel.selectionRate = channel.total > 0 
+        ? `${Math.round((channel.offers / channel.total) * 100)}%` 
+        : '0%';
+      
+      channel.rejectionRate = channel.total > 0 
+        ? `${Math.round((channel.rejected / channel.total) * 100)}%` 
+        : '0%';
+    });
+    
+    // Convert to array and sort by total descending
+    return Object.values(channelMap)
+      .sort((a, b) => b.total - a.total);
+      
+  }, [filteredData, selectedJobs]);
 
-  if (isLoading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900">
-        <div className="text-white">Loading dashboard data...</div>
-      </div>
+  // Calculate conversion rate
+  const conversionRate = useMemo(() => {
+    if (!filteredData) return '0%';
+    
+    const totalApplicants = filteredData.monthlyData.reduce(
+      (sum, month) => sum + month.totalApplicants, 0
     );
-  }
-
-  if (error) {
-    return (
-      <div className="flex items-center justify-center min-h-screen bg-gray-900">
-        <div className="text-red-500 flex items-center">
-          <span>{error}</span>
-          <button
-            onClick={() => setError(null)}
-            className="ml-4 text-white underline"
-          >
-            Close
-          </button>
-        </div>
-      </div>
+    
+    const totalOffers = filteredData.monthlyData.reduce(
+      (sum, month) => sum + month.totalOffers, 0
     );
-  }
-
-  // Update offers chart configuration
-  const offersChartConfig = {
-    data: monthlyData.map(month => ({
-      month: month.month,
-      offers: month.totalOffers
-    })),
-    keys: ['offers'],
-    indexBy: 'month',
-    margin: { top: 20, right: 20, bottom: 40, left: 40 },
-    padding: 0.15,
-    axisLeft: {
-      tickSize: 5,
-      tickPadding: 5,
-      tickRotation: 0,
-      legend: 'Count',
-      legendPosition: 'middle' as const,
-      legendOffset: -35,
-      truncateTickAt: 0
-    },
-    axisBottom: {
-      tickSize: 5,
-      tickPadding: 5,
-      tickRotation: 0,
-      legend: 'Month',
-      legendPosition: 'middle' as const,
-      legendOffset: 35,
-      truncateTickAt: 0
-    },
-    legends: []
-  };
+    
+    return totalApplicants > 0 
+      ? `${Math.round((totalOffers / totalApplicants) * 100)}%` 
+      : '0%';
+  }, [filteredData]);
 
   return (
-    <div className="min-h-screen bg-[#f7f9fc]">
-      {showTokenModal && <AuthTokenModal />}
-
-      {/* Header with clean design like in second image */}
-      <div className="bg-white border-b border-gray-200 sticky top-0 z-50 shadow-sm">
-        <div className="px-6 py-4 flex justify-between items-center max-w-[1920px] mx-auto">
-          <div className="flex items-center gap-4">
-            <h1 className="text-xl font-semibold text-gray-900">CXO Dashboard</h1>
-            <div className="h-6 w-px bg-gray-300"></div>
-            <MonthSelector
-              selectedMonth={selectedMonth}
-              setSelectedMonth={setSelectedMonth}
-            />
-            <div className="h-6 w-px bg-gray-300"></div>
-            <JobSelector
-              selectedJobs={selectedJobs}
-              setSelectedJobs={setSelectedJobs}
-            />
-          </div>
-
-          {/* Add the API Token button */}
-          {apiToken && <Button
-            onClick={() => setShowTokenModal(true)}
-            variant="outline"
-            className="flex items-center gap-2"
-          >
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z" />
-            </svg>
-            {'Update API Token'}
-          </Button>
-        }
-        </div>
+    <div className="container mx-auto py-8 px-4">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold">Recruitment Dashboard</h1>
+        <Button 
+          variant="outline" 
+          size="icon"
+          onClick={() => setSettingsOpen(true)}
+          title="API Settings"
+        >
+          <Settings className="h-4 w-4" />
+        </Button>
       </div>
-
-      {/* Main Content */}
-      <div className="p-6 max-w-[1920px] mx-auto space-y-6">
-        {/* If no token is set, show a message */}
-        {!apiToken && !isLoading && (
-          <div className="bg-white p-8 rounded-lg shadow-sm text-center">
-            <svg xmlns="http://www.w3.org/2000/svg" className="h-12 w-12 mx-auto text-gray-400 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-            <h2 className="text-xl font-semibold text-gray-900 mb-2">API Token Required</h2>
-            <p className="text-gray-600 mb-4">Please enter your API token to fetch dashboard data</p>
-            <Button
-              onClick={() => setShowTokenModal(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white"
-            >
-              Enter API Token
-            </Button>
+      
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+        <TabsList className="mb-6">
+          <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="referrals">Referrals</TabsTrigger>
+        </TabsList>
+        
+        <div className="flex items-center justify-between mb-6">
+          <div className="flex items-center space-x-4">
+            <MonthSelector selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />
+            
+            {dashboardData && (
+              <JobFilter 
+                jobs={Object.entries(dashboardData.jobData).map(([id, job]) => ({
+                  id,
+                  name: job.name,
+                  code: job.code
+                }))}
+                selectedJobs={selectedJobs}
+                setSelectedJobs={setSelectedJobs}
+              />
+            )}
           </div>
-        )}
-
-        {/* Only show dashboard content if token is set or data is loading */}
-        {(apiToken || isLoading) && (
+        </div>
+        
+        {loading ? (
+          <div className="flex items-center justify-center h-64">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
+          </div>
+        ) : error ? (
+          <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-3 rounded-md">
+            {error}
+          </div>
+        ) : (
           <>
-            {/* Top Metrics Cards - Clean white cards like in examples */}
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
-              <Card className="p-4 bg-white shadow-sm rounded-lg">
-                <h3 className="text-sm font-medium text-gray-500">Total Applicants</h3>
-                <p className="text-2xl font-semibold text-gray-900 mt-2">{currentMonthData?.totalApplicants || 0}</p>
-              </Card>
+            <TabsContent value="overview" className="mt-0">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+                <Card 
+                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (!filteredData) return;
+                    const allCandidates = Object.values(filteredData.candidateData || {});
+                    handleCandidateClick(
+                      allCandidates.map(c => c.ResumeId),
+                      'All Candidates'
+                    );
+                  }}
+                >
+                  <h3 className="text-sm font-medium text-gray-500">Total Applicants</h3>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredMonthlyData.reduce((sum, item) => sum + item.totalApplicants, 0)}
+                  </p>
+                </Card>
+                
+                <Card 
+                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (!filteredData) return;
+                    // Get candidates in active pipeline
+                    const activeCandidates = Object.values(filteredData.candidateData || {})
+                      .filter(c => c.ResumeStage.Value !== 1 && c.ResumeStage.Value !== 5 && c.ResumeStage.Value !== 19 && c.ResumeStage.Value !== 6); // Not rejected
+                    
+                    handleCandidateClick(
+                      activeCandidates.map(c => c.ResumeId),
+                      'Active Pipeline'
+                    );
+                  }}
+                >
+                  <h3 className="text-sm font-medium text-gray-500">Active Pipeline</h3>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredMonthlyData.reduce((sum, item) => sum + item.activePipeline, 0)}
+                  </p>
+                </Card>
+                
+                <Card 
+                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (!filteredData) return;
+                    // Get candidates with offers
+                    const offerCandidates = Object.values(filteredData.candidateData || {})
+                      .filter(c => {
+                        const stageName = c.ResumeStage.Name;
+                        return stageName === 'Offer' || stageName === 'Nurturing Campaign' || stageName === 'Hired';
+                      });
+                    
+                    handleCandidateClick(
+                      offerCandidates.map(c => c.ResumeId),
+                      'Offers'
+                    );
+                  }}
+                >
+                  <h3 className="text-sm font-medium text-gray-500">Total Offers</h3>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredMonthlyData.reduce((sum, item) => sum + item.totalOffers, 0)}
+                  </p>
+                </Card>
+                
+                <Card 
+                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (!filteredData) return;
+                    // Get rejected candidates
+                    const rejectedCandidates = Object.values(filteredData.candidateData || {})
+                      .filter(c => c.ResumeStage.Value === 1);
+                    
+                    handleCandidateClick(
+                      rejectedCandidates.map(c => c.ResumeId),
+                      'Rejected Candidates'
+                    );
+                  }}
+                >
+                  <h3 className="text-sm font-medium text-gray-500">Total Rejected</h3>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredMonthlyData.reduce((sum, item) => sum + item.totalRejected, 0)}
+                  </p>
+                </Card>
 
-              <Card className="p-4 bg-white shadow-sm rounded-lg">
-                <h3 className="text-sm font-medium text-gray-500">Offers Made</h3>
-                <p className="text-2xl font-semibold text-gray-900 mt-2">{currentMonthData?.totalOffers || 0}</p>
-              </Card>
-
-              <Card className="p-4 bg-white shadow-sm rounded-lg">
-                <h3 className="text-sm font-medium text-gray-500">Total Rejections</h3>
-                <p className="text-2xl font-semibold text-gray-900 mt-2">
-                  {(currentMonthData?.totalRejected || 0)}
-                </p>
-              </Card>
-
-              <Card className="p-4 bg-white shadow-sm rounded-lg">
-                <h3 className="text-sm font-medium text-gray-500">Active Pipeline</h3>
-                <p className="text-2xl font-semibold text-gray-900 mt-2">
-                  {(currentMonthData?.activePipeline || 0)}
-                </p>
-              </Card>
-              <Card className="p-4 bg-white shadow-sm rounded-lg">
-                <h3 className="text-sm font-medium text-gray-500">Conversion Rate</h3>
-                <p className="text-2xl font-semibold text-gray-900 mt-2">
-                  {currentMonthData?.totalOffers && currentMonthData?.totalApplicants
-                    ? ((currentMonthData.totalOffers / currentMonthData.totalApplicants) * 100).toFixed(2) + '%'
-                    : '0%'}
-                </p>
-              </Card>
-            </div>
-
-            {/* Pipeline Analytics - Clean white card like in examples */}
-            <Card className="p-6 bg-white rounded-lg shadow-sm">
-              <div className="flex justify-between items-center mb-6">
-                <h2 className="text-lg font-semibold text-gray-900">
-                  Recruitment Pipeline Analytics
-                </h2>
+                {/* Conversion Rate */}
+                <Card className="p-6 bg-white shadow-sm rounded-lg">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <p className="text-sm font-medium text-gray-500">Conversion Rate</p>
+                      <h3 className="text-2xl font-bold text-gray-900 mt-1">{conversionRate}</h3>
+                    </div>
+                    <div className="p-2 bg-purple-50 rounded-full">
+                      <BarChart className="h-5 w-5 text-purple-500" />
+                    </div>
+                  </div>
+                  <div className="mt-4 text-sm text-purple-600 flex items-center">
+                    <span>Applicants to offers</span>
+                  </div>
+                </Card>
               </div>
-
-              <div className="bg-white rounded-lg">
-                {/* Increased chart height for better visibility */}
-                <div className="h-[400px]">
-                  <ResponsiveBar
-                    data={currentMonthData?.pipelineStages
-                      // Filter out the "Reject" stage
-                      .filter(stage => stage.stage !== "Reject")
-                      // Sort stages in the specified order
-                      .sort((a, b) => {
-                        const stageOrder = [
-                          "Pool",
-                          "HR Screening",
-                          "Xobin Test",
-                          "L1 Interview",
-                          "L2 Interview",
-                          "Final Round",
-                          "HR Round",
-                          "Pre Offer Documentation",
-                          "Offer Approval",
-                          "Offer",
-                          "Nurturing Campaign",
-                          "Hired"
-                        ];
-                        return stageOrder.indexOf(a.stage) - stageOrder.indexOf(b.stage);
-                      })
-                      .map(stage => ({
-                        // Shorten "Pre Offer Documentation" to prevent overlap
-                        stage: stage.stage === "Pre Offer Documentation" ? "Pre Offer Doc" : stage.stage,
-                        active: stage.active,
-                        rejected: stage.rejected
-                      })) || []}
-                    keys={['active', 'rejected']}
-                    indexBy="stage"
-                    groupMode="grouped"
-                    margin={{ top: 30, right: 70, bottom: 120, left: 70 }}
-                    padding={0.25}
-                    innerPadding={4}
-                    valueScale={{ type: 'linear' }}
-                    indexScale={{ type: 'band', round: true }}
-                    colors={['#3b82f6', '#ef4444']} // Blue and red like in examples
-                    borderRadius={4}
-                    axisBottom={{
-                      tickSize: 5,
-                      tickPadding: 12,
-                      tickRotation: -55,
-                      legend: 'Pipeline Stages',
-                      legendPosition: 'middle',
-                      legendOffset: 95,
-                      truncateTickAt: 0
-                    }}
-                    axisLeft={{
-                      tickSize: 5,
-                      tickPadding: 8,
-                      tickRotation: 0,
-                      legend: 'Number of Candidates',
-                      legendPosition: 'middle',
-                      legendOffset: -55
-                    }}
-                    enableLabel={true}
-                    labelSkipWidth={20}
-                    labelSkipHeight={20}
-                    labelTextColor="#ffffff"
-                    labelFormat={value => `${value}`}
-                    labelOffset={-5}
-                    legends={[]}
-                    theme={{
-                      background: 'transparent',
-                      axis: {
-                        domain: {
-                          line: {
-                            stroke: '#e2e8f0',
-                            strokeWidth: 1
-                          }
-                        },
-                        ticks: {
-                          line: {
-                            stroke: '#e2e8f0',
-                            strokeWidth: 1
-                          },
-                          text: {
-                            fill: '#64748b',
-                            fontSize: 10,
-                            fontWeight: 500
-                          }
-                        },
-                        legend: {
-                          text: {
-                            fill: '#475569',
-                            fontSize: 12,
-                            fontWeight: 600
-                          }
-                        }
-                      },
-                      grid: {
-                        line: {
-                          stroke: '#f1f5f9',
-                          strokeWidth: 1
-                        }
-                      },
-                      tooltip: {
-                        container: {
-                          background: '#ffffff',
-                          color: '#1e293b',
-                          fontSize: '12px',
-                          borderRadius: '4px',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                          padding: '8px 12px',
-                          border: '1px solid #e2e8f0'
-                        }
-                      }
-                    }}
-                    role="application"
-                    ariaLabel="Pipeline Stages Analysis"
-                    barAriaLabel={e => `${e.id}: ${e.formattedValue} candidates in ${e.indexValue}`}
-                    tooltip={({ id, value, color, indexValue }) => (
-                      <div
-                        style={{
-                          padding: 12,
-                          color: '#333',
-                          background: '#fff',
-                          boxShadow: '0 1px 3px rgba(0,0,0,0.1)',
-                          borderRadius: 4
+              
+              {/* Add the charts section */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                {/* Recruitment Pipeline */}
+                <Card className="p-4 bg-white shadow-sm rounded-lg">
+                  <h3 className="text-lg font-medium mb-4">Recruitment Pipeline</h3>
+                  <div className="h-80">
+                    {pipelineChartData.length > 0 ? (
+                      <ResponsiveBar
+                        data={pipelineChartData}
+                        keys={['active', 'rejected']}
+                        indexBy="stage"
+                        margin={{ top: 10, right: 10, bottom: 100, left: 60 }}
+                        padding={0.3}
+                        valueScale={{ type: 'linear' }}
+                        indexScale={{ type: 'band', round: true }}
+                        colors={['#3b82f6', '#ef4444']}
+                        theme={chartTheme}
+                        axisBottom={{
+                          tickSize: 5,
+                          tickPadding: 10,
+                          tickRotation: -45,
+                          legend: 'Stage',
+                          legendPosition: 'middle',
+                          legendOffset: 80
                         }}
-                      >
-                        <div style={{ fontWeight: 'bold', marginBottom: 4 }}>
-                          {indexValue === "Pre Offer Doc" ? "Pre Offer Documentation" : indexValue}
-                        </div>
-                        <div style={{ display: 'flex', alignItems: 'center' }}>
-                          <div
-                            style={{
-                              width: 12,
-                              height: 12,
-                              backgroundColor: color,
-                              borderRadius: '50%',
-                              marginRight: 8
-                            }}
-                          />
-                          <span style={{ marginRight: 8 }}>{id}:</span>
-                          <span style={{ fontWeight: 'bold' }}>{value}</span>
-                        </div>
+                        axisLeft={{
+                          tickSize: 5,
+                          tickPadding: 5,
+                          tickRotation: 0,
+                          legend: 'Count',
+                          legendPosition: 'middle',
+                          legendOffset: -50
+                        }}
+                        labelSkipWidth={12}
+                        labelSkipHeight={12}
+                        legends={[
+                          {
+                            dataFrom: 'keys',
+                            anchor: 'bottom',
+                            direction: 'row',
+                            justify: false,
+                            translateX: 0,
+                            translateY: 50,
+                            itemsSpacing: 20,
+                            itemWidth: 100,
+                            itemHeight: 20,
+                            itemDirection: 'left-to-right',
+                            itemOpacity: 0.85,
+                            symbolSize: 12,
+                            effects: [
+                              {
+                                on: 'hover',
+                                style: {
+                                  itemOpacity: 1
+                                }
+                              }
+                            ]
+                          }
+                        ]}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-gray-500">No data available</p>
                       </div>
                     )}
-                  />
-                </div>
-
-                {/* Custom legends below the chart */}
-                <div className="flex justify-center items-center mt-4 space-x-12">
-                  <div className="flex items-center">
-                    <div className="w-4 h-4 rounded-full bg-[#3b82f6] mr-2"></div>
-                    <span className="text-sm font-medium text-gray-700">Active Pipeline</span>
                   </div>
-                  <div className="flex items-center">
-                    <div className="w-4 h-4 rounded-full bg-[#ef4444] mr-2"></div>
-                    <span className="text-sm font-medium text-gray-700">Rejection Analysis</span>
-                  </div>
-                </div>
-              </div>
-            </Card>
+                </Card>
 
-            {/* Channel Attribution - Clean white cards like in examples */}
-            <Card className="p-6 bg-white shadow-sm rounded-lg">
-              <h2 className="text-lg font-semibold text-gray-900 mb-4">Channel Attribution</h2>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                {currentMonthData?.channelData.map((channel) => (
-                  <div key={channel.name} className="bg-white rounded-lg p-4 border border-gray-100">
-                    <div className="flex items-center justify-between mb-3">
-                      <div className="flex items-center gap-2">
-                        <div
-                          className="w-3 h-3 rounded-full"
-                          style={{ backgroundColor: channelColors[channel.name] }}
-                        />
-                        <span className="font-medium text-gray-900">{channel.name}</span>
-                      </div>
-                      <span className="text-sm text-gray-500">{channel.percentage}</span>
-                    </div>
-
-                    <div className="h-[160px]">
+                {/* Channel Attribution */}
+                <Card className="p-4 bg-white shadow-sm rounded-lg">
+                  <h3 className="text-lg font-medium mb-4">Channel Attribution</h3>
+                  <div className="h-80">
+                    {channelChartData.length > 0 ? (
                       <ResponsivePie
-                        data={[
-                          {
-                            id: 'active',
-                            label: 'Active',
-                            value: channel.active,
-                            color: '#3b82f6'
-                          },
-                          {
-                            id: 'rejected',
-                            label: 'Rejected',
-                            value: channel.rejected,
-                            color: '#ef4444'
-                          }
-                        ]}
-                        margin={{ top: 10, right: 10, bottom: 10, left: 10 }}
-                        innerRadius={0.6}
-                        padAngle={0.5}
+                        data={channelChartData}
+                        margin={{ top: 40, right: 80, bottom: 80, left: 80 }}
+                        innerRadius={0.5}
+                        padAngle={0.7}
                         cornerRadius={3}
-                        activeOuterRadiusOffset={3}
-                        colors={['#3b82f6', '#ef4444']}
+                        activeOuterRadiusOffset={8}
+                        colors={{ datum: 'data.color' }}
                         borderWidth={1}
                         borderColor={{ from: 'color', modifiers: [['darker', 0.2]] }}
-                        enableArcLinkLabels={false}
-                        enableArcLabels={false}
-                        legends={[]}
-                        layers={[
-                          'arcs',
-                          'legends',
-                          ({ centerX, centerY }) => (
-                            <g>
-                              <text
-                                x={centerX}
-                                y={centerY - 10}
-                                textAnchor="middle"
-                                dominantBaseline="central"
-                                style={{
-                                  fontSize: '20px',
-                                  fontWeight: 'bold',
-                                  fill: '#1e293b'
-                                }}
-                              >
-                                {channel.value}
-                              </text>
-                              <text
-                                x={centerX}
-                                y={centerY + 10}
-                                textAnchor="middle"
-                                dominantBaseline="central"
-                                style={{
-                                  fontSize: '12px',
-                                  fill: '#64748b'
-                                }}
-                              >
-                                Total
-                              </text>
-                            </g>
-                          )
+                        arcLinkLabelsSkipAngle={10}
+                        arcLinkLabelsTextColor="#333333"
+                        arcLinkLabelsThickness={2}
+                        arcLinkLabelsColor={{ from: 'color' }}
+                        arcLabelsSkipAngle={10}
+                        arcLabelsTextColor={{ from: 'color', modifiers: [['darker', 2]] }}
+                        theme={chartTheme}
+                        legends={[
+                          {
+                            anchor: 'bottom',
+                            direction: 'row',
+                            justify: false,
+                            translateX: 0,
+                            translateY: 56,
+                            itemsSpacing: 20,
+                            itemWidth: 100,
+                            itemHeight: 18,
+                            itemTextColor: '#999',
+                            itemDirection: 'left-to-right',
+                            itemOpacity: 1,
+                            symbolSize: 18,
+                            symbolShape: 'circle',
+                          }
                         ]}
                       />
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-2 mt-2 text-sm">
-                      <div className="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-100">
-                        <span className="text-gray-600">Active</span>
-                        <span className="font-semibold text-[#3b82f6]">{channel.active}</span>
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-gray-500">No data available</p>
                       </div>
-                      <div className="flex items-center justify-between p-2 bg-gray-50 rounded border border-gray-100">
-                        <span className="text-gray-600">Rejected</span>
-                        <span className="font-semibold text-[#ef4444]">{channel.rejected}</span>
-                      </div>
-                    </div>
+                    )}
                   </div>
-                ))}
+                </Card>
               </div>
-            </Card>
 
-            {/* Stage-wise Conversion Rates Table - Clean design like in examples */}
-            <div className="bg-white rounded-lg shadow-sm p-6">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-gray-900">Stage-wise Conversion Rates</h3>
-                <div className="flex items-center gap-2">
-                  <div className="text-sm text-gray-500">
-                    Selection and rejection rates by stage
-                  </div>
-                  <Button
-                    onClick={exportStageConversionRates}
-                    className="bg-blue-600 hover:bg-blue-700 text-white text-sm flex items-center gap-1"
-                    size="sm"
-                  >
-                    <svg
-                      className="w-3 h-3"
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                      xmlns="http://www.w3.org/2000/svg"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+                {/* Monthly Trends */}
+                <Card className="p-4 bg-white shadow-sm rounded-lg">
+                  <h3 className="text-lg font-medium mb-4">Monthly Trends</h3>
+                  <div className="h-80">
+                    {monthlyTrendsData.length > 0 ? (
+                      <ResponsiveBar
+                        data={monthlyTrendsData}
+                        keys={['activePipeline', 'offers', 'rejected']}
+                        indexBy="month"
+                        margin={{ top: 20, right: 20, bottom: 80, left: 60 }}
+                        padding={0.3}
+                        groupMode="grouped"
+                        valueScale={{ type: 'linear' }}
+                        indexScale={{ type: 'band', round: true }}
+                        colors={['#3b82f6', '#10b981', '#ef4444']}
+                        theme={chartTheme}
+                        axisBottom={{
+                          tickSize: 5,
+                          tickPadding: 5,
+                          tickRotation: 0,
+                          legend: 'Month',
+                          legendPosition: 'middle',
+                          legendOffset: 32
+                        }}
+                        axisLeft={{
+                          tickSize: 5,
+                          tickPadding: 5,
+                          tickRotation: 0,
+                          legend: 'Count',
+                          legendPosition: 'middle',
+                          legendOffset: -40
+                        }}
+                        labelSkipWidth={12}
+                        labelSkipHeight={12}
+                        legends={[
+                          {
+                            dataFrom: 'keys',
+                            anchor: 'bottom',
+                            direction: 'row',
+                            justify: false,
+                            translateX: 0,
+                            translateY: 60,
+                            itemsSpacing: 20,
+                            itemWidth: 100,
+                            itemHeight: 20,
+                            itemDirection: 'left-to-right',
+                            itemOpacity: 0.85,
+                            symbolSize: 12,
+                            effects: [
+                              {
+                                on: 'hover',
+                                style: {
+                                  itemOpacity: 1
+                                }
+                              }
+                            ]
+                          }
+                        ]}
                       />
-                    </svg>
-                    Export
-                  </Button>
-                </div>
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-gray-500">No data available</p>
+                      </div>
+                    )}
+                  </div>
+                </Card>
+
+                {/* Stage-wise Conversion Rates */}
+                <Card className="p-4 bg-white shadow-sm rounded-lg mt-6">
+                  <h3 className="text-lg font-medium mb-4">Stage-wise Conversion Rates</h3>
+                  <div className="h-80">
+                    {conversionRatesData.length > 0 ? (
+                      <ResponsiveBar
+                        data={conversionRatesData}
+                        keys={['selectionRate', 'rejectionRate']}
+                        indexBy="stage"
+                        margin={{ top: 10, right: 10, bottom: 100, left: 60 }}
+                        padding={0.3}
+                        groupMode="grouped"
+                        valueScale={{ type: 'linear' }}
+                        indexScale={{ type: 'band', round: true }}
+                        colors={['#10b981', '#ef4444']}
+                        theme={chartTheme}
+                        axisBottom={{
+                          tickSize: 5,
+                          tickPadding: 10,
+                          tickRotation: -45,
+                          legend: 'Stage',
+                          legendPosition: 'middle',
+                          legendOffset: 80
+                        }}
+                        axisLeft={{
+                          tickSize: 5,
+                          tickPadding: 5,
+                          tickRotation: 0,
+                          legend: 'Rate (%)',
+                          legendPosition: 'middle',
+                          legendOffset: -50,
+                          format: v => `${v}%`
+                        }}
+                        labelFormat={v => `${v}%`}
+                        labelSkipWidth={12}
+                        labelSkipHeight={12}
+                        legends={[
+                          {
+                            dataFrom: 'keys',
+                            anchor: 'bottom',
+                            direction: 'row',
+                            justify: false,
+                            translateX: 0,
+                            translateY: 50,
+                            itemsSpacing: 20,
+                            itemWidth: 100,
+                            itemHeight: 20,
+                            itemDirection: 'left-to-right',
+                            itemOpacity: 0.85,
+                            symbolSize: 12,
+                            data: [
+                              {
+                                id: 'selectionRate',
+                                label: 'Selection Rate',
+                                color: '#10b981'
+                              },
+                              {
+                                id: 'rejectionRate',
+                                label: 'Rejection Rate',
+                                color: '#ef4444'
+                              }
+                            ],
+                            effects: [
+                              {
+                                on: 'hover',
+                                style: {
+                                  itemOpacity: 1
+                                }
+                              }
+                            ]
+                          }
+                        ]}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <p className="text-gray-500">No data available</p>
+                      </div>
+                    )}
+                  </div>
+                </Card>
               </div>
 
-              <div className="relative overflow-x-auto rounded-lg border border-gray-200">
-                <table className="w-full text-sm text-left">
-                  <thead className="text-xs uppercase bg-gray-100 text-gray-700">
-                    <tr>
-                      <th className="px-4 py-3 font-semibold">Month</th>
-                      <th className="px-4 py-3 font-semibold">Metric</th>
-                      <th className="px-4 py-3 font-semibold">Pool</th>
-                      <th className="px-4 py-3 font-semibold">HR Screening</th>
-                      <th className="px-4 py-3 font-semibold">Xobin Test</th>
-                      <th className="px-4 py-3 font-semibold">L1 Interview</th>
-                      <th className="px-4 py-3 font-semibold">L2 Interview</th>
-                      <th className="px-4 py-3 font-semibold">Final Round</th>
-                      <th className="px-4 py-3 font-semibold">HR Round</th>
-                      <th className="px-4 py-3 font-semibold">Pre Offer Doc</th>
-                      <th className="px-4 py-3 font-semibold">Offer Approval</th>
-                      <th className="px-4 py-3 font-semibold">Offer</th>
-                      <th className="px-4 py-3 font-semibold">Nurturing Campaign</th>
-                      <th className="px-4 py-3 font-semibold">Hired</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-200">
-                    {monthlyData.map((data, index) => (
-                      <React.Fragment key={`${data.month}-rates`}>
-                        {/* Selection Rate Row */}
-                        <tr className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} transition-color`}>
-                          <td className="px-4 py-3 font-medium text-gray-900" rowSpan={2}>
-                            {data.month}
+              {/* Channel Attribution Details */}
+              <Card className="p-4 bg-white shadow-sm rounded-lg mt-6">
+                <h3 className="text-lg font-medium mb-4">Channel Performance Metrics</h3>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="border-b">
+                        <th className="text-left py-3 px-4">Channel</th>
+                        <th className="text-right py-3 px-4">Total</th>
+                        <th className="text-right py-3 px-4">Active</th>
+                        <th className="text-right py-3 px-4">Offers</th>
+                        <th className="text-right py-3 px-4">Rejected</th>
+                        <th className="text-right py-3 px-4">Selection Rate</th>
+                        <th className="text-right py-3 px-4">Rejection Rate</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {channelDetailData.map((channel, index) => (
+                        <tr 
+                          key={channel.name} 
+                          className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}
+                        >
+                          <td className="py-3 px-4 font-medium">
+                            <div className="flex items-center">
+                              <div 
+                                className="w-3 h-3 rounded-full mr-2" 
+                                style={{ backgroundColor: channelColors[channel.name] || '#6366f1' }}
+                              ></div>
+                              {channel.name}
+                            </div>
                           </td>
-                          <td className="px-4 py-3 text-green-600 font-medium">Selection Rate</td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.Pool]?.selectionRate || "N/A"}
+                          <td className="text-right py-3 px-4">{channel.total}</td>
+                          <td className="text-right py-3 px-4">{channel.active}</td>
+                          <td className="text-right py-3 px-4">{channel.offers}</td>
+                          <td className="text-right py-3 px-4">{channel.rejected}</td>
+                          <td className="text-right py-3 px-4">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              parseFloat(channel.selectionRate) > 50 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-yellow-100 text-yellow-800'
+                            }`}>
+                              {channel.selectionRate}
+                            </span>
                           </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.HR_Screening]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.Xobin_Test]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.L1_Interview]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.L2_Interview]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.Final_Round]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.HR_Round]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.Pre_Offer_Documentation]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.Offer_Approval]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.Offer]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.Nurturing_Campaign]?.selectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-green-600">
-                            {data.stageConversionRates[EStage.Hired]?.selectionRate || "N/A"}
+                          <td className="text-right py-3 px-4">
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              parseFloat(channel.rejectionRate) < 50 
+                                ? 'bg-green-100 text-green-800' 
+                                : 'bg-red-100 text-red-800'
+                            }`}>
+                              {channel.rejectionRate}
+                            </span>
                           </td>
                         </tr>
-
-                        {/* Rejection Rate Row */}
-                        <tr className={`${index % 2 === 0 ? 'bg-white' : 'bg-gray-50'} transition-colors`}>
-                          <td className="px-4 py-3 text-red-600 font-medium">Rejection Rate</td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.Pool]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.HR_Screening]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.Xobin_Test]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.L1_Interview]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.L2_Interview]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.Final_Round]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.HR_Round]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.Pre_Offer_Documentation]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.Offer_Approval]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.Offer]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.Nurturing_Campaign]?.rejectionRate || "N/A"}
-                          </td>
-                          <td className="px-4 py-3 text-red-600">
-                            {data.stageConversionRates[EStage.Hired]?.rejectionRate || "N/A"}
-                          </td>
-                        </tr>
-                      </React.Fragment>
-                    ))}
-
-                    {/* Average Row */}
-                    <tr className="bg-gray-100 transition-colors">
-                      <td className="px-4 py-3 font-medium text-gray-900" rowSpan={2}>Average</td>
-                      <td className="px-4 py-3 text-green-600 font-medium">Selection Rate</td>
-                      {allStages.map(stage => (
-                        <td key={`avg-selection-${stage}`} className="px-4 py-3 text-green-600">
-                          {(() => {
-                            const rates = monthlyData
-                              .map(month => month.stageConversionRates[stage]?.selectionRate || "0%")
-                              .map(rate => parseFloat(rate) || 0);
-                            const avg = rates.reduce((sum, rate) => sum + rate, 0) / rates.length;
-                            return `${avg.toFixed(2)}%`;
-                          })()}
-                        </td>
                       ))}
-                    </tr>
-                    <tr className="bg-gray-100 transition-colors">
-                      <td className="px-4 py-3 text-red-600 font-medium">Rejection Rate</td>
-                      {allStages.map(stage => (
-                        <td key={`avg-rejection-${stage}`} className="px-4 py-3 text-red-600">
-                          {(() => {
-                            const rates = monthlyData
-                              .map(month => month.stageConversionRates[stage]?.rejectionRate || "0%")
-                              .map(rate => parseFloat(rate) || 0);
-                            const avg = rates.reduce((sum, rate) => sum + rate, 0) / rates.length;
-                            return `${avg.toFixed(2)}%`;
-                          })()}
-                        </td>
-                      ))}
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            {/* Charts section - Clean white cards like in examples */}
-            <div className="grid grid-cols-1 gap-4">
-              <Card className="p-6 bg-white shadow-sm rounded-lg">
-                <h2 className="text-lg font-semibold text-gray-900 mb-4">Monthly Offers</h2>
-                <div className="h-[250px]">
-                  <ResponsiveBar<{ month: string; offers: number }>
-                    data={offersChartConfig.data}
-                    keys={offersChartConfig.keys}
-                    indexBy={offersChartConfig.indexBy}
-                    margin={offersChartConfig.margin}
-                    padding={offersChartConfig.padding}
-                    axisLeft={{
-                      ...offersChartConfig.axisLeft,
-                      legendPosition: 'middle'
-                    }}
-                    axisBottom={{
-                      ...offersChartConfig.axisBottom,
-                      legendPosition: 'middle'
-                    }}
-                    legends={offersChartConfig.legends}
-                    theme={{
-                      ...chartTheme,
-                      background: '#ffffff',
-                      text: {
-                        fill: '#374151',
-                        fontSize: 11
-                      }
-                    }}
-                    colors={['#3b82f6']}
-                    borderRadius={4}
-                  />
+                    </tbody>
+                  </table>
                 </div>
               </Card>
-            </div>
+            </TabsContent>
+            
+            <TabsContent value="referrals" className="mt-0">
+              {dashboardData && (
+                <ReferralDashboard 
+                  referralData={dashboardData.referralData}
+                  candidateData={dashboardData.candidateData}
+                  selectedMonth={selectedMonth}
+                  selectedJobs={selectedJobs}
+                  onCandidateClick={(candidateIds) => {
+                    handleCandidateClick(candidateIds, 'Referral Candidates');
+                  }}
+                />
+              )}
+            </TabsContent>
           </>
         )}
-      </div>
+      </Tabs>
+      
+      {/* Candidate Details Modal */}
+      <CandidateDetailsModal
+        isOpen={modalOpen}
+        onClose={() => setModalOpen(false)}
+        candidates={selectedCandidates}
+        title={modalTitle}
+      />
+
+      <ApiTokenSettings 
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        onTokenSaved={() => {
+          setApiTokenSet(true);
+          fetchData();
+        }}
+      />
     </div>
   );
 }

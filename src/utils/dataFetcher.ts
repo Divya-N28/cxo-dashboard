@@ -72,7 +72,7 @@ interface StageConversionRates {
     [key: string]: StageConversionRate;
 }
 
-const stageMapping: StageMapping = {
+export const stageMapping: StageMapping = {
     "0": "Pool",
     "14": "HR Screening",
     "15": "Xobin Test",
@@ -387,7 +387,6 @@ async function fetchSourceData(jobId: string, startDate: string, endDate: string
             EngagementCategory: null,
             CTCCategory: null,
             CandidateAvailabilityCategory: null,
-            ShowActive: true,
             CandidateName: {
                 FilterType: "NONE",
                 Value: null
@@ -521,10 +520,7 @@ apiClient.interceptors.response.use(
                 
                 // Save the new tokens
                 const newToken = response.data.access_token;
-                const newRefreshToken = response.data.refresh_token;
-                
-                console.log("Token refreshed successfully");
-                
+                const newRefreshToken = response.data.refresh_token;                
                 API_TOKEN = newToken;
                 
                 // Update the original request and retry
@@ -541,33 +537,34 @@ apiClient.interceptors.response.use(
 );
 
 // Update the testApiToken function to handle token refresh
-async function testApiToken(): Promise<boolean> {
-    try {
-        // Make a simple API call to test token validity
-        const response = await apiClient.get('org/c9e42850-b626-42bb-ac22-669df9596949/jobs/partialdata');
-        
-        // If we get here, the token is valid
-        return true;
-    } catch (error) {
-        if (axios.isAxiosError(error)) {
-            // Token refresh is handled by the interceptor, so if we still get 401 here,
-            // it means refresh failed or wasn't possible
-            if (error.response?.status === 401) {
-                // Clear token from session storage
-                if (typeof window !== 'undefined') {
-                    sessionStorage.removeItem('apiToken');
-                    sessionStorage.removeItem('refreshToken');
-                }
-            } else if (error.response?.status === 403) {
-                console.error('Access forbidden. Please check your permissions.');
-            } else {
-                console.error('API test failed:', error.message);
-            }
-        } else {
-            console.error('Unknown error during API test:', error);
-        }
-        return false;
+export async function testApiToken(token: string): Promise<{ success: boolean; message?: string }> {
+  try {
+    const response = await axios.get('https://api.turbohire.co/api/jobs', {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    
+    if (response.status === 200) {
+      return { success: true };
     }
+    
+    return { success: false, message: 'Invalid API token' };
+  } catch (error) {
+    if (axios.isAxiosError(error) && error.response?.status === 401) {
+      // Try to refresh the token
+      const newToken = await refreshToken(token);
+      
+      if (newToken) {
+        // Test the new token
+        return testApiToken(newToken);
+      }
+      
+      return { success: false, message: 'Token expired and refresh failed' };
+    }
+    
+    return { success: false, message: 'Error testing API token' };
+  }
 }
 
 // Add a job-specific cache
@@ -600,8 +597,8 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
         }
         API_TOKEN = token;
         // Test token validity first
-        const isTokenValid = await testApiToken();
-        if (!isTokenValid) {
+        const isTokenValid = await testApiToken(token);
+        if (!isTokenValid.success) {
             return { 
                 data: [],
                 error: { status: 401, message: 'Invalid API token' }
@@ -975,5 +972,715 @@ function combineStageConversionRates(jobsData: MonthlyData[]): StageConversionRa
     return combinedRates;
 }
 
-// Export the refreshToken function
-export { testApiToken }; 
+// Add new interfaces for candidate data
+interface CandidateEducation {
+  InstituteName: string;
+  UniversityName: string;
+  Degree: string;
+  EndYear: number;
+  Percent: string;
+  Cgpa: string;
+}
+
+interface CandidateWorkExperience {
+  CompanyName: string;
+  Role: string;
+  StartDate: {
+    Month: number;
+    Day: number;
+    Year: number;
+  };
+  EndDate: {
+    Month: number;
+    Day: number;
+    Year: number;
+  };
+  Duration: number;
+}
+
+interface CandidateSource {
+  SourceCategory: string;
+  SourceDrillDown1: string;
+  SourceDrillDown2: string;
+}
+
+interface CandidateParent {
+  ParentId: string;
+  Type: string;
+  Name: string;
+  JobCode: string;
+}
+
+interface CandidateData {
+  UserData: {
+    Name: string;
+    EmailId: string;
+    EmailIds: string[];
+    PhoneNumber: string;
+    PhoneNumbers: string[];
+    EducationList: CandidateEducation[];
+  };
+  WorkData: {
+    WorkDataList: CandidateWorkExperience[];
+    TotalExperience: number;
+    isCurrentlyWorking: boolean;
+  };
+  Source: CandidateSource;
+  ResumeStage: {
+    Name: string;
+    Value: number;
+    Category: string;
+    previousStatus: number;
+  };
+  Parent: CandidateParent;
+  ResumeId: string;
+  ResumeUrl: string;
+  UploadDateTime: string;
+}
+
+// Add interface for referral data
+interface ReferralSummary {
+  month: string;
+  totalReferrals: number;
+  referrers: {
+    name: string;
+    count: number;
+    percentage: string;
+    candidates: string[]; // ResumeIds for drill-down
+  }[];
+  stages: {
+    stage: string;
+    count: number;
+    percentage: string;
+    candidates: string[]; // ResumeIds for drill-down
+  }[];
+  conversionRate: string;
+}
+
+// Add interface for dashboard data with drill-down capabilities
+interface DashboardData {
+  monthlyData: MonthlyData[];
+  jobData: { [jobId: string]: { name: string, code: string } };
+  candidatesByStage: { 
+    [month: string]: {
+      [stage: string]: string[] // ResumeIds for drill-down
+    } 
+  };
+  candidatesByChannel: {
+    [month: string]: {
+      [channel: string]: string[] // ResumeIds for drill-down
+    }
+  };
+  referralData: {
+    summary: ReferralSummary[];
+    topReferrers: {
+      name: string;
+      count: number;
+      percentage: string;
+      candidates: string[]; // ResumeIds for drill-down
+    }[];
+  };
+  candidateData: { [resumeId: string]: CandidateData };
+}
+
+// Function to fetch resume IDs for a date range
+async function fetchResumeIds(startDate: string, endDate: string): Promise<string[]> {
+  try {
+    const cacheKey = `resumeIds-${startDate}-${endDate}`;
+    
+    // Check cache first
+    const cachedData = cache.get(cacheKey);
+    if (cachedData && cachedData.timestamp > Date.now() - CACHE_DURATION) {
+      return cachedData.data;
+    }
+    
+    const payload = {
+      Columns: [],
+      Index: 0,
+      CurrentParentIds: [],
+      RetargetIds: [],
+      OwnerIds: [],
+      Offices: {
+        FilterType: "NONE",
+        Value: null
+      },
+      UploadedDate: {
+        FilterType: "IS_BETWEEN",
+        Value: {
+          StartDate: startDate,
+          EndDate: endDate
+        }
+      },
+      ShowActive: true
+    };
+    
+    // First request to get initial batch and total count
+    const initialResponse = await apiClient.post(
+      'resumes/ids?skip=0&top=1000&fetchUnique=true',
+      payload
+    );
+    
+    let resumeIds = initialResponse.data?.OrderedResumeIds || [];
+    const totalCount = initialResponse.data?.FilteredCount || 0;
+    
+    // If there are more IDs to fetch
+    if (resumeIds.length < totalCount) {
+      const batchSize = 1000; // Increase batch size for subsequent requests
+      const remainingBatches = Math.ceil((totalCount - resumeIds.length) / batchSize);
+      
+      for (let i = 0; i < remainingBatches; i++) {
+        const skip = resumeIds.length;
+        const response = await apiClient.post(
+          `resumes/ids?skip=${skip}&top=${batchSize}&fetchUnique=true`,
+          payload
+        );
+
+        if (response.data && Array.isArray(response.data?.OrderedResumeIds)) {
+          resumeIds = [...resumeIds, ...response.data?.OrderedResumeIds || []];
+        }
+        
+        // Add delay between batches to prevent rate limiting
+        if (i < remainingBatches - 1) {
+          await delay(500);
+        }
+      }
+    }
+    
+    // Cache the response
+    cache.set(cacheKey, {
+      data: resumeIds,
+      timestamp: Date.now()
+    });
+    console.log(resumeIds.length);
+    return resumeIds;
+  } catch (error) {
+    console.error('Error fetching resume IDs:', error);
+    return [];
+  }
+}
+
+// Function to fetch candidate data for resume IDs
+async function fetchCandidateData(resumeIds: string[]): Promise<{ [id: string]: CandidateData }> {
+  try {
+    if (resumeIds.length === 0) return {};
+    
+    const cacheKey = `candidates-${resumeIds.join('-')}`;
+    
+    // Check cache first
+    const cachedData = candidateCache.get(cacheKey);
+    if (cachedData && cachedData.timestamp > Date.now() - CACHE_DURATION) {
+      return cachedData.data;
+    }
+    
+    // Split into batches to avoid request size limits
+    const batchSize = 50;
+    let allCandidates: { [id: string]: CandidateData } = {};
+    
+    for (let i = 0; i < resumeIds.length; i += batchSize) {
+      const batchIds = resumeIds.slice(i, i + batchSize);
+      
+      const response = await apiClient.post(
+        'resumes/data',
+        { ResumeIds: batchIds }
+      );
+      
+      if (response.data && Array.isArray(response.data)) {
+        // Convert array to object with ResumeId as key for easier lookup
+        response.data.forEach((candidate: CandidateData) => {
+          if (candidate.ResumeId) {
+            allCandidates[candidate.ResumeId] = candidate;
+          }
+        });
+      }
+      
+      // Add delay between batches
+      if (i + batchSize < resumeIds.length) {
+        await delay(500);
+      }
+    }
+    
+    // Cache the response
+    candidateCache.set(cacheKey, {
+      data: allCandidates,
+      timestamp: Date.now()
+    });
+    
+    return allCandidates;
+  } catch (error) {
+    console.error('Error fetching candidate data:', error);
+    return {};
+  }
+}
+
+// Update the refresh token function with the correct payload format
+async function refreshToken(currentToken: string): Promise<string | null> {
+  try {
+    // Create form data with the correct parameters
+    const formData = new URLSearchParams();
+    formData.append('client_id', 'TH.Mvc.Api');
+    formData.append('client_secret', 'a4dc1f627af9400084b56d8b68d8d910');
+    formData.append('refresh_token', "0F13791F3EE871E428403A486155470392321E766E2E2C3F45B55C0DFCA20B5E-1");
+    formData.append('grant_type', 'refresh_token');
+
+    const response = await axios.post('https://identity.turbohire.co/connect/token', 
+      formData.toString(),
+      {
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded'
+        }
+      }
+    );
+    
+    if (response.data && response.data.access_token) {
+      // Save the new token to localStorage
+      localStorage.setItem('turbohire_api_token', response.data.access_token);
+      return response.data.access_token;
+    }
+    
+    return null;
+  } catch (error) {
+    console.error('Error refreshing token:', error);
+    return null;
+  }
+}
+
+// Simplified function to fetch and display dashboard data
+async function generateDashboardData(token: string) {
+  try {    
+    // Set up API client with token
+    const apiClient = axios.create({
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json'
+      }
+    });
+    
+    // Step 1: Verify token with a simple API call
+    await apiClient.get('https://api.turbohire.co/api/jobs');
+    
+    // Step 2: Get current year's date range
+    const currentDate = new Date();
+    const currentYear = currentDate.getFullYear();
+    const yearStartDate = new Date(currentYear, 0, 1).toISOString();
+    const yearEndDate = new Date(currentYear, 11, 31, 23, 59, 59, 999).toISOString();
+    
+    // Step 3: Fetch resume IDs for the current year
+    const resumeIdsPayload = {
+      Columns: [],
+      Index: 0,
+      CurrentParentIds: [],
+      RetargetIds: [],
+      OwnerIds: [],
+      Offices: { FilterType: "NONE", Value: null },
+      UploadedDate: {
+        Value: {
+          StartDate: yearStartDate,
+          EndDate: yearEndDate
+        },
+        FilterType: "IS_BETWEEN"
+      },
+    };
+    
+   const resumeIds = await fetchResumeIds(yearStartDate, yearEndDate);
+    
+    if (!resumeIds) {
+      return { 
+        data: {
+          monthlyData: [],
+          jobData: {},
+          candidatesByStage: {},
+          candidatesByChannel: {},
+          referralData: { summary: [], topReferrers: [] },
+          candidateData: {}
+        }
+      };
+    }
+    
+    console.log(`Found ${resumeIds.length} resumes`);
+    
+    // Step 4: Fetch resume data in batches
+    const batchSize = 300;
+    const allResumes = [];
+    
+    for (let i = 0; i < resumeIds.length; i += batchSize) {
+      const batchIds = resumeIds.slice(i, Math.min(i + batchSize, resumeIds.length));
+      
+      try {
+        const resumeDataResponse = await apiClient.post(
+          'https://api.turbohire.co/api/resumes/resumedata',
+          batchIds
+        );
+        
+        if (resumeDataResponse.data) {
+          allResumes.push(...resumeDataResponse.data);
+        }
+      } catch (error) {
+        console.error(`Error fetching batch ${Math.floor(i/batchSize) + 1}:`, error);
+      }
+    }
+        
+    // Step 5: Process data for dashboard
+    const candidateData = {};
+    const jobData = {};
+    const monthlyDataMap = {};
+    const candidatesByStage = {};
+    const candidatesByChannel = {};
+    const jobSpecificData = [];
+
+    
+    
+    // Process each resume
+    allResumes.forEach(resume => {
+      // Store job info
+
+      if(resume.Parent && resume.Parent.ParentId === "c64b2bf3-09ef-426d-9f9e-608c40590ae2") {
+        jobSpecificData.push(resume);
+    }
+      if (resume.Parent && resume.Parent.ParentId) {
+        jobData[resume.Parent.ParentId] = {
+          name: resume.Parent.Name,
+          code: resume.Parent.JobCode || ''
+        };
+      }
+      
+      // Store candidate data
+      candidateData[resume.ResumeId] = {
+        UserData: {
+          Name: resume.UserData.Name || '',
+          EmailId: resume.UserData.EmailId || '',
+          PhoneNumber: resume.UserData.PhoneNumber || '',
+          EducationList: resume.UserData.EducationList || []
+        },
+        WorkData: {
+          WorkDataList: resume?.WorkData?.WorkDataList || [],
+          TotalExperience: resume?.WorkData?.TotalExperience || 0,
+          isCurrentlyWorking: resume?.WorkData?.IsCurrentlyWorking || false
+        },
+        Source: resume.Source || {},
+        ResumeStage: {
+          Name: stageMapping[resume.Status] || 'Unknown',
+          Value: resume.Status,
+          previousStatus: resume.PreviousStatus
+        },
+        Parent: {
+          ParentId: resume.Parent.ParentId,
+          Type: "Job",
+          Name: resume.Parent.ParentName || '',
+          JobCode: resume.Parent.JobCode || ''
+        },
+        ResumeId: resume.ResumeId,
+        ResumeUrl: resume.ResumeUrl || '',
+        UploadDateTime: resume.UploadDateTime || ''
+      };
+      
+      // Get month from upload date
+      const uploadDate = new Date(resume.UploadDateTime);
+      const month = uploadDate.toLocaleString('en-US', { month: 'short' });
+      
+      // Initialize monthly data if not exists
+      if (!monthlyDataMap[month]) {
+        monthlyDataMap[month] = {
+          month,
+          totalApplicants: 0,
+          processed: 0,
+          scheduled: 0,
+          attended: 0,
+          l1Select: 0,
+          l1Reject: 0,
+          noShow: 0,
+          l2Scheduled: 0,
+          l2Selected: 0,
+          l2Rejected: 0,
+          offer: 0,
+          totalRejected: 0,
+          totalOffers: 0,
+          activePipeline: 0,
+          channelData: [],
+          pipelineStages: []
+        };
+      }
+      
+      // Initialize stage tracking
+      if (!candidatesByStage[month]) {
+        candidatesByStage[month] = {};
+      }
+      
+      // Initialize channel tracking
+      if (!candidatesByChannel[month]) {
+        candidatesByChannel[month] = {};
+      }
+      
+      // Update monthly counts
+      monthlyDataMap[month].totalApplicants++;
+      
+      // Track by stage
+      const stageName = stageMapping[resume.Status] || 'Unknown';
+      if (!candidatesByStage[month][stageName]) {
+        candidatesByStage[month][stageName] = [];
+      }
+      candidatesByStage[month][stageName].push(resume.ResumeId);
+      
+      // Track by channel
+      const sourceCategory = resume.Source?.SourceCategory || 'Unknown';
+      const sourceName = resume.Source?.SourceDrillDown1 || sourceCategory;
+      if (!candidatesByChannel[month][sourceName]) {
+        candidatesByChannel[month][sourceName] = [];
+      }
+      candidatesByChannel[month][sourceName].push(resume.ResumeId);
+      const status = stageMapping[resume.Status];
+      // Update counts based on stage
+      if (resume.Status === 1) {
+        monthlyDataMap[month].totalRejected++;
+      } else if (status === 'Offer' || status === 'Nurturing Campaign' || status === 'Hired') {
+        monthlyDataMap[month].totalOffers++;
+        monthlyDataMap[month].offer++;
+      } else {
+        monthlyDataMap[month].activePipeline++;
+      }
+      
+      // Update other metrics based on stage
+      if (status === 'HR Screening' || status === 'Pool') {
+        monthlyDataMap[month].processed++;
+      } else if (status === 'L1 Interview') {
+        monthlyDataMap[month].scheduled++;
+      } else if (status === 'L2 Interview') {
+        monthlyDataMap[month].attended++;
+        monthlyDataMap[month].l1Select++;
+        monthlyDataMap[month].l2Scheduled++;
+      } else if (status === 'Rejected' && sourceName === 'L1 Interview') {
+        monthlyDataMap[month].l1Reject++;
+      } else if (status === 'Rejected' && sourceName === 'L2 Interview') {
+        monthlyDataMap[month].l2Rejected++;
+      }
+    });
+    
+    console.log(jobSpecificData);
+    // Calculate percentages and format data
+    const monthlyData = Object.values(monthlyDataMap).map(monthData => {
+      // Calculate channel data
+      if (candidatesByChannel[monthData.month]) {
+        monthData.channelData = Object.entries(candidatesByChannel[monthData.month]).map(([name, candidates]) => {
+          const active = candidates.filter(id => {
+            const candidate = candidateData[id];
+            return candidate && candidate.ResumeStage.Value !== 1; // Not rejected
+          }).length;
+          
+          const rejected = candidates.length - active;
+          
+          return {
+            name,
+            value: candidates.length,
+            active,
+            rejected,
+            percentage: `${Math.round((candidates.length / monthData.totalApplicants) * 100) || 0}%`
+          };
+        });
+      }
+      
+      // Calculate pipeline stages
+      if (candidatesByStage[monthData.month]) {
+        monthData.pipelineStages = Object.entries(candidatesByStage[monthData.month]).map(([stage, candidates]) => {
+          const active = candidates.filter(id => {
+            const candidate = candidateData[id];
+            return candidate && candidate.ResumeStage.Value !== 1; // Not rejected
+          }).length;
+          
+          const rejected = candidates.length - active;
+          
+          return {
+            stage,
+            active,
+            rejected
+          };
+        });
+      }
+      
+      // Calculate percentages
+      monthData.processedToScheduled = monthData.totalApplicants > 0 
+        ? `${Math.round((monthData.scheduled / monthData.totalApplicants) * 100)}%` 
+        : '0%';
+      
+      monthData.l1NoShowRate = monthData.scheduled > 0 
+        ? `${Math.round((monthData.noShow / monthData.scheduled) * 100)}%` 
+        : '0%';
+      
+      monthData.l1RejectionRate = monthData.scheduled > 0 
+        ? `${Math.round((monthData.l1Reject / monthData.scheduled) * 100)}%` 
+        : '0%';
+      
+      monthData.offerPercentage = monthData.scheduled > 0 
+        ? `${Math.round((monthData.offer / monthData.scheduled) * 100)}%` 
+        : '0%';
+      
+      monthData.l2RejectionRate = monthData.l2Scheduled > 0 
+        ? `${Math.round((monthData.l2Rejected / monthData.l2Scheduled) * 100)}%` 
+        : '0%';
+      
+      // Calculate stage conversion rates
+      const stageConversionRates = {};
+      
+      if (candidatesByStage[monthData.month]) {
+        Object.entries(candidatesByStage[monthData.month]).forEach(([stage, candidates]) => {
+          const total = candidates.length;
+          if (total === 0) return;
+          
+          const rejected = candidates.filter(id => {
+            const candidate = candidateData[id];
+            return candidate && candidate.ResumeStage.Value === 1;
+          }).length;
+          
+          const selected = total - rejected;
+          
+          stageConversionRates[stage] = {
+            selectionRate: `${Math.round((selected / total) * 100)}%`,
+            rejectionRate: `${Math.round((rejected / total) * 100)}%`
+          };
+        });
+      }
+      
+      monthData.stageConversionRates = stageConversionRates;
+      
+      return monthData;
+    });
+    
+    // Process referral data
+    const referralCandidates = Object.values(candidateData).filter(c => 
+      c.Source.SourceCategory === "Referral"
+    );
+    
+    const referralSummary = [];
+    const referralsByMonth = {};
+    
+    // Group referrals by month
+    referralCandidates.forEach(candidate => {
+      const uploadDate = new Date(candidate.UploadDateTime);
+      const month = uploadDate.toLocaleString('en-US', { month: 'short' });
+      
+      if (!referralsByMonth[month]) {
+        referralsByMonth[month] = [];
+      }
+      
+      referralsByMonth[month].push(candidate);
+    });
+    
+    // Process referrals for each month
+    Object.entries(referralsByMonth).forEach(([month, candidates]) => {
+      const monthReferralSummary = {
+        month,
+        totalReferrals: candidates.length,
+        referrers: [],
+        stages: [],
+        conversionRate: '0%'
+      };
+      
+      // Group by referrer
+      const referrerMap = {};
+      candidates.forEach(candidate => {
+        const referrer = candidate.Source.SourceDrillDown2 || "Unknown";
+        if (!referrerMap[referrer]) {
+          referrerMap[referrer] = [];
+        }
+        referrerMap[referrer].push(candidate.ResumeId);
+      });
+      
+      // Create referrers array
+      monthReferralSummary.referrers = Object.entries(referrerMap).map(([name, ids]) => ({
+        name,
+        count: ids.length,
+        percentage: `${Math.round((ids.length / candidates.length) * 100)}%`,
+        candidates: ids
+      }));
+      
+      // Group by stage
+      const stageMap = {};
+      candidates.forEach(candidate => {
+        const stage = candidate.ResumeStage.Name;
+        if (!stageMap[stage]) {
+          stageMap[stage] = [];
+        }
+        stageMap[stage].push(candidate.ResumeId);
+      });
+      
+      // Create stages array
+      monthReferralSummary.stages = Object.entries(stageMap).map(([stage, ids]) => ({
+        stage,
+        count: ids.length,
+        percentage: `${Math.round((ids.length / candidates.length) * 100)}%`,
+        candidates: ids
+      }));
+      
+      // Calculate conversion rate
+      const offerStages = ["Offer", "Nurturing Campaign", "Hired"];
+      const offersCount = monthReferralSummary.stages
+        .filter(s => offerStages.includes(s.stage))
+        .reduce((sum, stage) => sum + stage.count, 0);
+      
+      monthReferralSummary.conversionRate = `${Math.round((offersCount / candidates.length) * 100)}%`;
+      
+      referralSummary.push(monthReferralSummary);
+    });
+    
+    // Find top referrers across all months
+    const allReferrers = {};
+    referralCandidates.forEach(candidate => {
+      const referrer = candidate.Source.SourceDrillDown2 || "Unknown";
+      if (!allReferrers[referrer]) {
+        allReferrers[referrer] = [];
+      }
+      allReferrers[referrer].push(candidate.ResumeId);
+    });
+    
+    const topReferrers = Object.entries(allReferrers)
+      .map(([name, candidates]) => ({
+        name,
+        count: candidates.length,
+        percentage: `${Math.round((candidates.length / referralCandidates.length || 1) * 100)}%`,
+        candidates
+      }))
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 10);
+    
+    // Sort monthly data by month (most recent first)
+    monthlyData.sort((a, b) => {
+      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+      return months.indexOf(b.month) - months.indexOf(a.month);
+    });
+        
+    return { 
+      data: {
+        monthlyData,
+        jobData,
+        candidatesByStage,
+        candidatesByChannel,
+        referralData: {
+          summary: referralSummary,
+          topReferrers
+        },
+        candidateData
+      }
+    };
+  } catch (error) {
+    console.error('Error generating dashboard data:', error);
+    
+    if (axios.isAxiosError(error)) {
+      const status = error.response?.status || 500;
+      const message = error.message || 'Unknown error occurred';
+      
+      return {
+        data: null,
+        error: { status, message }
+      };
+    }
+    
+    return {
+      data: null,
+      error: { status: 500, message: 'Unknown error occurred' }
+    };
+  }
+}
+
+// Export the new functions
+export { 
+  generateDashboardData,
+  refreshToken
+}; 

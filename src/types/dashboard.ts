@@ -28,17 +28,18 @@ export interface ChannelData {
 
 
   export enum EStage {
-    Pool = "Pool",
-    HR_Screening = "HR Screening",
-    Xobin_Test = "Xobin Test",
-    L1_Interview = "L1 Interview",
-    L2_Interview = "L2 Interview",
-    Final_Round = "Final Round",
-    HR_Round = "HR Round",
-    Pre_Offer_Documentation = "Pre Offer Documentation",
-    Offer_Approval = "Offer Approval",
-    Offer = "Offer",
-    Nurturing_Campaign = "Nurturing Campaign",
-    Hired = "Hired",
-    Reject = "Reject"
+    Pool = 'Pool',
+    HR_Screening = 'HR Screening',
+    Xobin_Test = 'Xobin Test',
+    Panel_Screening = 'Panel Screening',
+    L1_Interview = 'L1 Interview',
+    L2_Interview = 'L2 Interview',
+    Final_Round = 'Final Round',
+    Pre_Offer_Documentation = 'Pre Offer Documentation',
+    HR_Round = 'HR Round',
+    Offer_Approval = 'Offer Approval',
+    Offer = 'Offer',
+    Nurturing_Campaign = 'Nurturing Campaign',
+    Hired = 'Hired',
+    Reject = 'Reject'
 }
