@@ -125,6 +125,8 @@ export const stageMapping: StageMapping = {
     EStage.Hired
   ];
 
+const channelCategories = ["Naukri", "LinkedIn", "Referral", "CareerPage"]
+
 const sourceTypes = [
     { SourceCategory: "JobBoards", SourceName: "naukri" },
     { SourceCategory: "JobBoards", SourceName: "linkedin" },
@@ -1421,10 +1423,12 @@ async function generateDashboardData(token: string) {
       candidatesByStage[month][stageName].push(resume.ResumeId);
       
       // Track by channel
-      const sourceCategory = resume.Source?.SourceCategory || 'Unknown';
-      const sourceName = resume.Source?.SourceDrillDown1 || sourceCategory;
+      // const sourceCategory = resume.Source?.SourceCategory || 'Unknown';
+      const source = resume.Source?.SourceDrillDown1;
+      const sourceName = resume.Source?.SourceCategory === "RecruitmentPartners" ? "Recriutment Partners" : (channelCategories.includes(source) ?  source : "Others");
+
       if (!candidatesByChannel[month][sourceName]) {
-        candidatesByChannel[month][sourceName] = [];
+        candidatesByChannel[month][sourceName] = [];   
       }
       candidatesByChannel[month][sourceName].push(resume.ResumeId);
       const status = stageMapping[resume.Status];
@@ -1453,9 +1457,7 @@ async function generateDashboardData(token: string) {
         monthlyDataMap[month].l2Rejected++;
       }
     });
-    
-    console.log(jobSpecificData);
-    // Calculate percentages and format data
+        // Calculate percentages and format data
     const monthlyData = Object.values(monthlyDataMap).map(monthData => {
       // Calculate channel data
       if (candidatesByChannel[monthData.month]) {

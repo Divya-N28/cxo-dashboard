@@ -101,6 +101,7 @@ interface CandidateData {
   ResumeStage: {
     Name: string;
     Value: number;
+    previousStatus: number,
   };
   Parent: {
     Name: string;
@@ -554,9 +555,9 @@ export default function Dashboard() {
       monthData.totalApplicants++;
       
       // Get the stage name from the mapping
-      const stageName = stageMapping[candidate.ResumeStage.Value.toString()] || "Unknown";
+      const stageName = stageMapping[candidate.ResumeStage.Value] || "Unknown";
       const status = candidate.ResumeStage.Value;
-      const previousStatus = candidate.ResumeStage?.PreviousStatus;
+      const previousStatus = candidate.ResumeStage.previousStatus;
       // Update pipeline stages
       if (status === 1) { // This is a rejected candidate
         // Find the previous stage where the candidate was rejected
@@ -623,26 +624,40 @@ export default function Dashboard() {
     return filteredData.monthlyData.filter(item => item.month === selectedMonth);
   }, [filteredData, selectedMonth]);
 
-  // Update the pipelineChartData to use filtered data and proper ordering
+  // Update the pipelineChartData to properly handle rejections and active counts
   const pipelineChartData = useMemo(() => {
-    if (filteredMonthlyData.length) {
-      // Use the most recent month's data for the pipeline chart
-      const latestMonth = filteredMonthlyData[filteredMonthlyData.length - 1];
-    
-      // Sort stages based on the pipelineStageOrder
-      return latestMonth.pipelineStages
-        .map(stage => ({
-          stage: stage.stage,
-          active: stage.active,
-          rejected: stage.rejected,
-          order: pipelineStageOrder[stage.stage] || 999 // Use 999 for unknown stages
-        }))
-        .sort((a, b) => a.order - b.order) // Sort by the order
-        .map(({ stage, active, rejected }) => ({ stage, active, rejected })); // Remove the order property
-    }
-    
-    return []; // Return empty array if no data
-  }, [filteredMonthlyData]);
+    if (!filteredData || !filteredMonthlyData.length) return [];
+
+    // Initialize stage data with proper structure
+    const stageData = Object.fromEntries(
+      Object.values(stageMapping)
+        .filter(stage => stage !== "Reject") // Exclude the Reject stage
+        .map(stage => [stage, { stage, active: 0, rejected: 0 }])
+    );
+
+    // Process all candidates to aggregate stage data
+    Object.values(filteredData.candidateData).forEach(candidate => {
+      const currentStage = stageMapping[candidate.ResumeStage.Value.toString()];
+      const previousStage = stageMapping[candidate.ResumeStage.previousStatus?.toString()];
+
+      if (candidate.ResumeStage.Value === 1) { // Rejected
+        // Add to rejected count of the previous stage
+        if (previousStage && stageData[previousStage]) {
+          stageData[previousStage].rejected++;
+        }
+      } else if (currentStage && stageData[currentStage]) {
+        // Add to active count of current stage
+        stageData[currentStage].active++;
+      }
+    });
+
+    // Convert to array and sort by stage order
+    return Object.values(stageData)
+      .filter(data => data.active > 0 || data.rejected > 0) // Only include stages with data
+      .sort((a, b) => 
+        (pipelineStageOrder[a.stage] || 999) - (pipelineStageOrder[b.stage] || 999)
+      );
+  }, [filteredData, filteredMonthlyData]);
 
   // Restore the original channelChartData calculation
   const channelChartData = useMemo(() => {
@@ -1085,6 +1100,7 @@ export default function Dashboard() {
                         indexBy="stage"
                         margin={{ top: 10, right: 10, bottom: 100, left: 60 }}
                         padding={0.3}
+                        groupMode="stacked"
                         valueScale={{ type: 'linear' }}
                         indexScale={{ type: 'band', round: true }}
                         colors={['#3b82f6', '#ef4444']}
@@ -1121,6 +1137,10 @@ export default function Dashboard() {
                             itemDirection: 'left-to-right',
                             itemOpacity: 0.85,
                             symbolSize: 12,
+                            data: [
+                              { id: 'active', label: 'Active', color: '#3b82f6' },
+                              { id: 'rejected', label: 'Rejected', color: '#ef4444' }
+                            ],
                             effects: [
                               {
                                 on: 'hover',
@@ -1131,6 +1151,14 @@ export default function Dashboard() {
                             ]
                           }
                         ]}
+                        tooltip={({ id, value, indexValue, color }) => (
+                          <div className="bg-white p-2 shadow-lg rounded-lg border">
+                            <strong>{indexValue}</strong>
+                            <div style={{ color }}>
+                              {id === 'active' ? 'Active: ' : 'Rejected: '}{value}
+                            </div>
+                          </div>
+                        )}
                       />
                     ) : (
                       <div className="flex items-center justify-center h-full">
