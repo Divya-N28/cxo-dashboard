@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsivePie } from "@nivo/pie";
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { generateDashboardData, testApiToken, stageMapping } from '@/utils/dataFetcher';
+import { generateDashboardData, testApiToken, stageMapping, channelCategories } from '@/utils/dataFetcher';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -494,13 +494,14 @@ export default function Dashboard() {
       channelAttr: {},
       pipelineChartData: [],
       channelChartData: [],
-      channelData: [],
+      channelMetrics: [],
+      monthlyTrends: [] as any[],
     }
 
     // Initialize channelChartData array
     values.channelChartData = [];
 
-        // Create a map to aggregate channel counts across all data entries
+    // Create a map to aggregate channel counts across all data entries
     const channelCounts = new Map();
     
     Object.keys(_dashboardData.allDatas).map((item) => {
@@ -556,12 +557,6 @@ export default function Dashboard() {
         values.pipelineStages[currentStage].active++;
       }
 
-      values.channelData.push({
-        name: data.Source.SourceDrillDown1,
-        value: data.Source.SourceDrillDown2,
-        active: data.ResumeStage.Value,
-        rejected: data.ResumeStage.previousStatus
-      })
     }
     })
 
@@ -580,6 +575,95 @@ export default function Dashboard() {
         color: channelColors[channelName] || '#6b7280' // Use predefined color or fallback to gray
       });
     });
+
+    // Initialize channel metrics
+    const channelMetrics = new Map();
+
+    // Process candidate data to calculate channel metrics
+    Object.keys(_dashboardData.candidateData).forEach((item) => {
+      const data = _dashboardData.candidateData[item];
+      const [itemMonth, itemJobId] = item.split('_');
+
+      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+
+      if (monthMatches && jobMatches) {
+        const stageName = stageMapping[data.ResumeStage.Value];
+        const source = data.Source?.SourceDrillDown1;
+        const sourceName = data.Source?.SourceCategory === "RecruitmentPartners" ? "Recriutment Partners" : (channelCategories.includes(source) ?  source : "Others");
+        
+        if (!channelMetrics.has(sourceName)) {
+          channelMetrics.set(sourceName, {
+            name: sourceName,
+            total: 0,
+            active: 0,
+            offers: 0,
+            rejected: 0
+          });
+        }
+
+        const metrics = channelMetrics.get(sourceName);
+        metrics.total++;
+
+        if (data.ResumeStage.Value === 1) {
+          metrics.rejected++;
+        } else if (['Offer', 'Nurturing Campaign', 'Hired'].includes(stageName)) {
+          metrics.offers++;
+        } else {
+          metrics.active++;
+        }
+      }
+    });
+
+    // Calculate rates and format the final channel metrics
+    values.channelMetrics = Array.from(channelMetrics.values()).map(metrics => ({
+      ...metrics,
+      selectionRate: metrics.total > 0 
+        ? `${((metrics.offers / metrics.total) * 100).toFixed(1)}%`
+        : '0%',
+      rejectionRate: metrics.total > 0
+        ? `${((metrics.rejected / metrics.total) * 100).toFixed(1)}%`
+        : '0%'
+    })).sort((a, b) => b.total - a.total); // Sort by total count descending
+
+    // Create a map to store monthly aggregated data
+    const monthlyData = new Map();
+
+    Object.keys(_dashboardData.candidateData).forEach((item) => {
+      const data = _dashboardData.candidateData[item];
+      const [itemMonth, itemJobId] = item.split('_');
+
+      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+
+      if (jobMatches) {
+        if (!monthlyData.has(itemMonth)) {
+          monthlyData.set(itemMonth, {
+            month: itemMonth,
+            activePipeline: 0,
+            offers: 0,
+            rejected: 0
+          });
+        }
+
+        const monthStats = monthlyData.get(itemMonth);
+        const stageName = stageMapping[data.ResumeStage.Value];
+
+        if (data.ResumeStage.Value === 1) {
+          monthStats.rejected++;
+        } else if (['Offer', 'Nurturing Campaign', 'Hired'].includes(stageName)) {
+          monthStats.offers++;
+        } else {
+          monthStats.activePipeline++;
+        }
+      }
+    });
+
+    // Convert map to array and sort by month
+    values.monthlyTrends = Array.from(monthlyData.values())
+      .sort((a, b) => {
+        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+        return months.indexOf(a.month) - months.indexOf(b.month);
+      });
 
     setFilteredData(values);
   }
@@ -891,9 +975,9 @@ export default function Dashboard() {
                 <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Monthly Trends</h3>
                   <div className="h-80">
-                    {[].length > 0 ? (
+                    {filteredData.monthlyTrends?.length > 0 ? (
                       <ResponsiveBar
-                        data={[]}
+                        data={filteredData.monthlyTrends}
                         keys={['activePipeline', 'offers', 'rejected']}
                         indexBy="month"
                         margin={{ top: 20, right: 20, bottom: 80, left: 60 }}
@@ -935,6 +1019,23 @@ export default function Dashboard() {
                             itemDirection: 'left-to-right',
                             itemOpacity: 0.85,
                             symbolSize: 12,
+                            data: [
+                              {
+                                id: 'activePipeline',
+                                label: 'Active Pipeline',
+                                color: '#3b82f6'
+                              },
+                              {
+                                id: 'offers',
+                                label: 'Offers',
+                                color: '#10b981'
+                              },
+                              {
+                                id: 'rejected',
+                                label: 'Rejected',
+                                color: '#ef4444'
+                              }
+                            ],
                             effects: [
                               {
                                 on: 'hover',
@@ -945,6 +1046,14 @@ export default function Dashboard() {
                             ]
                           }
                         ]}
+                        tooltip={({ id, value, indexValue, color }) => (
+                          <div className="bg-white p-2 shadow-lg rounded-lg border">
+                            <strong>{indexValue}</strong>
+                            <div style={{ color }}>
+                              {id}: {value}
+                            </div>
+                          </div>
+                        )}
                       />
                     ) : (
                       <div className="flex items-center justify-center h-full">
@@ -1053,7 +1162,7 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {[].map((channel, index) => (
+                      {filteredData.channelMetrics?.map((channel, index) => (
                         <tr
                           key={channel.name}
                           className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}
@@ -1072,18 +1181,20 @@ export default function Dashboard() {
                           <td className="text-right py-3 px-4">{channel.offers}</td>
                           <td className="text-right py-3 px-4">{channel.rejected}</td>
                           <td className="text-right py-3 px-4">
-                            <span className={`px-2 py-1 rounded-full text-xs ${parseFloat(channel.selectionRate) > 50
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-yellow-100 text-yellow-800'
-                              }`}>
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              parseFloat(channel.selectionRate) > 50
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-yellow-100 text-yellow-800'
+                            }`}>
                               {channel.selectionRate}
                             </span>
                           </td>
                           <td className="text-right py-3 px-4">
-                            <span className={`px-2 py-1 rounded-full text-xs ${parseFloat(channel.rejectionRate) < 50
-                              ? 'bg-green-100 text-green-800'
-                              : 'bg-red-100 text-red-800'
-                              }`}>
+                            <span className={`px-2 py-1 rounded-full text-xs ${
+                              parseFloat(channel.rejectionRate) < 50
+                                ? 'bg-green-100 text-green-800'
+                                : 'bg-red-100 text-red-800'
+                            }`}>
                               {channel.rejectionRate}
                             </span>
                           </td>

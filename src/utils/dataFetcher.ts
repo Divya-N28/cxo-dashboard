@@ -127,7 +127,7 @@ export const stageMapping: StageMapping = {
     EStage.Hired
   ];
 
-const channelCategories = ["Naukri", "LinkedIn", "Referral", "CareerPage"]
+export const channelCategories = ["Naukri", "LinkedIn", "Referral", "CareerPage"]
 
 const sourceTypes = [
     { SourceCategory: "JobBoards", SourceName: "naukri" },
