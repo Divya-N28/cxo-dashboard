@@ -115,14 +115,14 @@ interface CandidateData {
 interface DashboardData {
   monthlyData: MonthlyData[];
   jobData: { [jobId: string]: { name: string, code: string } };
-  candidatesByStage: { 
+  candidatesByStage: {
     [month: string]: {
-      [stage: string]: string[] 
-    } 
+      [stage: string]: string[]
+    }
   };
   candidatesByChannel: {
     [month: string]: {
-      [channel: string]: string[] 
+      [channel: string]: string[]
     }
   };
   referralData: {
@@ -229,9 +229,9 @@ const getAvailableMonths = () => {
 };
 
 // Add the MonthSelector component
-const MonthSelector = ({ selectedMonth, setSelectedMonth }: { 
-  selectedMonth: string, 
-  setSelectedMonth: (month: string) => void 
+const MonthSelector = ({ selectedMonth, setSelectedMonth }: {
+  selectedMonth: string,
+  setSelectedMonth: (month: string) => void
 }) => {
   const availableMonths = getAvailableMonths();
 
@@ -285,13 +285,13 @@ const MonthSelector = ({ selectedMonth, setSelectedMonth }: {
 };
 
 // Add the JobSelector component after the MonthSelector
-const JobSelector = ({ selectedJobs, setSelectedJobs }: { 
-  selectedJobs: string[], 
-  setSelectedJobs: (jobs: string[]) => void 
+const JobSelector = ({ selectedJobs, setSelectedJobs }: {
+  selectedJobs: string[],
+  setSelectedJobs: (jobs: string[]) => void
 }) => {
   // Sort jobs by JobName
   const sortedJobs = [...jobs].sort((a, b) => a.JobName.localeCompare(b.JobName));
-  
+
   const toggleJob = (jobId: string) => {
     if (jobId === 'all') {
       // Toggle "All Jobs" - if all jobs are selected, deselect all; otherwise, select all
@@ -317,17 +317,17 @@ const JobSelector = ({ selectedJobs, setSelectedJobs }: {
           className="w-[240px] justify-start text-left font-normal"
         >
           <ChevronDown className="mr-2 h-4 w-4" />
-          {selectedJobs.length === jobs.length 
-            ? 'All Jobs' 
-            : selectedJobs.length === 0 
-              ? 'Select Jobs' 
+          {selectedJobs.length === jobs.length
+            ? 'All Jobs'
+            : selectedJobs.length === 0
+              ? 'Select Jobs'
               : `${selectedJobs.length} Job${selectedJobs.length > 1 ? 's' : ''} Selected`}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-[280px] p-0 max-h-[400px] overflow-auto" align="start">
         <div className="space-y-4 p-4">
           <div className="grid gap-2">
-            <div 
+            <div
               className="flex items-center space-x-2 rounded-md p-2 hover:bg-gray-100 cursor-pointer"
               onClick={() => toggleJob('all')}
             >
@@ -339,7 +339,7 @@ const JobSelector = ({ selectedJobs, setSelectedJobs }: {
             <div className="border-t my-2" />
             <div className="grid gap-1">
               {sortedJobs.map((job) => (
-                <div 
+                <div
                   key={job.JobId}
                   className="flex items-center space-x-2 rounded-md p-2 hover:bg-gray-100 cursor-pointer"
                   onClick={() => toggleJob(job.JobId)}
@@ -421,7 +421,7 @@ export default function Dashboard() {
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<string>('overview');
-  
+
   // Modal state for candidate details
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [selectedCandidates, setSelectedCandidates] = useState<CandidateData[]>([]);
@@ -430,38 +430,39 @@ export default function Dashboard() {
   // Add these state variables to your Dashboard component
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [apiTokenSet, setApiTokenSet] = useState(false);
+  const [filteredData, setFilteredData] = useState<any>({});
 
   // Update the fetchData function to properly handle the API flow
   const fetchData = async () => {
     setLoading(true);
     setError(null);
-    
+
     const token = localStorage.getItem('turbohire_api_token');
-    
+
     if (!token) {
       setLoading(false);
       setError('API token is missing. Please set it in the settings.');
       return;
     }
-    
+
     try {
       // First test if the token is valid
       const tokenTest = await testApiToken(token);
-      
+
       if (!tokenTest.success) {
         // If token test failed, show error
         setError('API token is invalid. Please update it in settings.');
         setLoading(false);
         return;
       }
-      
+
       // If token is valid, fetch dashboard data
       const result = await generateDashboardData(token);
       if (result.error) {
         setError(`Error: ${result.error.message}`);
       } else if (result.data) {
         setDashboardData(result.data);
-        console.log('Dashboard data loaded:', result.data);
+        calculateFilteredData(result.data);
       } else {
         setError('No data returned from API');
       }
@@ -472,12 +473,111 @@ export default function Dashboard() {
       setLoading(false);
     }
   };
-  
+
+  useEffect(() => {
+    if (dashboardData) {
+      calculateFilteredData(dashboardData);
+    }
+
+  }, [selectedJobs, selectedMonth])
+
+  const calculateFilteredData = (_dashboardData: any) => {
+    const values = {
+      totalApplicants: 0,
+      activePipeline: 0,
+      totalOffers: 0,
+      totalRejected: 0,
+      conversionRate: 0,
+      pipelineStages: {},
+      channelAttr: {},
+      pipelineChartData: [],
+      channelChartData: []
+    }
+
+    // Initialize channelChartData array
+    values.channelChartData = [];
+
+        // Create a map to aggregate channel counts across all data entries
+    const channelCounts = new Map();
+    
+    Object.keys(_dashboardData.allDatas).map((item) => {
+      const data = _dashboardData.allDatas[item];
+
+      const [itemMonth, itemJobId] = item.split('_');
+
+      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+
+      if ((monthMatches && jobMatches)) {
+        values.totalApplicants += data.totalApplicants;
+        values.activePipeline += data.activePipeline;
+        values.totalOffers += data.totalOffers;
+        values.totalRejected += data.totalRejected;
+
+        Object.entries(data.channel).forEach(([channelName, count]) => {
+          const currentCount = channelCounts.get(channelName) || 0;
+          channelCounts.set(channelName, currentCount + count);
+        });
+      }
+    })
+
+    Object.keys(_dashboardData.candidateData).map((item) => {
+      const data = _dashboardData.candidateData[item];
+      const [itemMonth, itemJobId] = item.split('_');
+
+      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+
+      if ((monthMatches && jobMatches)) {
+
+      const currentStage = stageMapping[data.ResumeStage.Value];
+      const previousStage = stageMapping[data.ResumeStage.previousStatus];
+
+      if (data.ResumeStage.Value === 1) {
+        if (!values.pipelineStages[previousStage]) {
+          values.pipelineStages[previousStage] = {
+            stage: previousStage,
+            active: 0,
+            rejected: 0
+          }
+        }
+        values.pipelineStages[previousStage].rejected++;
+      } else {
+        if (!values.pipelineStages[currentStage]) {
+          values.pipelineStages[currentStage] = {
+            stage: currentStage,
+            active: 0,
+            rejected: 0
+          }
+        }
+        values.pipelineStages[currentStage].active++;
+      }
+    }
+    })
+
+    Object.keys(values.pipelineStages).map((item) => {
+      const data = values.pipelineStages[item];
+      values.pipelineChartData.push(data);
+    })
+
+
+    // Convert aggregated data to pie chart format
+    channelCounts.forEach((count, channelName) => {
+      values.channelChartData.push({
+        id: channelName,
+        label: channelName,
+        value: count,
+        color: channelColors[channelName] || '#6b7280' // Use predefined color or fallback to gray
+      });
+    });
+
+    setFilteredData(values);
+  }
   // Make sure we fetch data when the component mounts
   useEffect(() => {
     const token = localStorage.getItem('turbohire_api_token');
     setApiTokenSet(!!token);
-    
+
     if (token) {
       fetchData();
     }
@@ -486,465 +586,22 @@ export default function Dashboard() {
   // Handle candidate click
   const handleCandidateClick = (resumeIds: string[], title: string = 'Candidate Details') => {
     if (!dashboardData || !resumeIds.length) return;
-    
+
     const candidates = resumeIds
       .map(id => dashboardData.candidateData[id])
       .filter(Boolean);
-    
+
     setSelectedCandidates(candidates);
     setModalTitle(title);
     setModalOpen(true);
   };
 
-  // Update the filteredData useMemo to properly filter based on selected jobs
-  const filteredData = useMemo(() => {
-    if (!dashboardData) return null;
-    
-    // If no jobs selected, return all data
-    if (selectedJobs.length === 0) {
-      return dashboardData;
-    }
-    
-    // Filter candidates by selected jobs
-    const filteredCandidateData = Object.entries(dashboardData.candidateData)
-      .filter(([_, candidate]) => {
-        // Check if the candidate's job is in the selected jobs list
-        return selectedJobs.includes(candidate.Parent?.ParentId);
-      })
-      .reduce((acc, [id, candidate]) => {
-        acc[id] = candidate;
-        return acc;
-      }, {} as typeof dashboardData.candidateData);
-    
-    // Calculate new monthly data based on filtered candidates
-    const monthlyDataMap = new Map();
-    
-    // Initialize with existing months
-    dashboardData.monthlyData.forEach(monthData => {
-      monthlyDataMap.set(monthData.month, {
-        ...monthData,
-        totalApplicants: 0,
-        totalRejected: 0,
-        totalOffers: 0,
-        activePipeline: 0,
-        channelData: [...monthData.channelData].map(channel => ({
-          ...channel,
-          value: 0,
-          active: 0,
-          rejected: 0
-        })),
-        pipelineStages: [...monthData.pipelineStages].map(stage => ({
-          ...stage,
-          active: 0,
-          rejected: 0
-        }))
-      });
-    });
-    
-    // Count candidates for each month
-    Object.values(filteredCandidateData).forEach(candidate => {
-      // Extract month from upload date
-      const uploadDate = new Date(candidate.UploadDateTime);
-      const month = uploadDate.toLocaleString('default', { month: 'short' });
-      
-      if (!monthlyDataMap.has(month)) return;
-      
-      const monthData = monthlyDataMap.get(month);
-      
-      // Increment total applicants
-      monthData.totalApplicants++;
-      
-      // Get the stage name from the mapping
-      const stageName = stageMapping[candidate.ResumeStage.Value] || "Unknown";
-      const status = candidate.ResumeStage.Value;
-      const previousStatus = candidate.ResumeStage.previousStatus;
-      // Update pipeline stages
-      if (status === 1) { // This is a rejected candidate
-        // Find the previous stage where the candidate was rejected
-        const previousStageName = stageMapping[previousStatus] || "Pool";
-        
-        // Find or create the previous stage in our pipeline data
-        let previousStageIndex = monthData.pipelineStages.findIndex(s => s.stage === previousStageName);
-        if (previousStageIndex === -1) {
-          // If stage doesn't exist yet, add it
-          monthData.pipelineStages.push({
-            stage: previousStageName,
-            active: 0,
-            rejected: 0
-          });
-          previousStageIndex = monthData.pipelineStages.length - 1;
-        }
-        
-        // Increment rejected count for the previous stage
-        monthData.pipelineStages[previousStageIndex].rejected++;
-        monthData.totalRejected++;
-      } else {
-        // This is an active candidate - use your existing logic for active candidates
-        let stageIndex = monthData.pipelineStages.findIndex(s => s.stage === stageName);
-        if (stageIndex === -1) {
-          // If stage doesn't exist yet, add it
-          monthData.pipelineStages.push({
-            stage: stageName,
-            active: 0,
-            rejected: 0
-          });
-          stageIndex = monthData.pipelineStages.length - 1;
-        }
-        
-        // Increment active count for the current stage
-        monthData.pipelineStages[stageIndex].active++;
-        
-        // Your existing logic for counting offers and active pipeline
-        if (["Offer", "Nurturing Campaign", "Hired"].includes(stageName)) {
-          monthData.totalOffers++;
-        } else {
-          monthData.activePipeline++;
-        }
-      }
-    });
-    
-    // Convert map back to array
-    const filteredMonthlyData = Array.from(monthlyDataMap.values());
-    
-    return {
-      ...dashboardData,
-      candidateData: filteredCandidateData,
-      monthlyData: filteredMonthlyData
-    };
-  }, [dashboardData, selectedJobs]);
-
-  // Update the filteredMonthlyData variable to use the filtered data
-  const filteredMonthlyData = useMemo(() => {
-    if (!filteredData) return [];
-    
-    if (selectedMonth === 'All') {
-      return filteredData.monthlyData;
-    }
-    
-    return filteredData.monthlyData.filter(item => item.month === selectedMonth);
-  }, [filteredData, selectedMonth]);
-
-  // Update the pipelineChartData to properly handle rejections and active counts
-  const pipelineChartData = useMemo(() => {
-    if (!filteredData || !filteredMonthlyData.length) return [];
-
-    // Initialize stage data with proper structure
-    const stageData = Object.fromEntries(
-      Object.values(stageMapping)
-        .filter(stage => stage !== "Reject") // Exclude the Reject stage
-        .map(stage => [stage, { stage, active: 0, rejected: 0 }])
-    );
-
-    // Process all candidates to aggregate stage data
-    Object.values(filteredData.candidateData).forEach(candidate => {
-      const currentStage = stageMapping[candidate.ResumeStage.Value.toString()];
-      const previousStage = stageMapping[candidate.ResumeStage.previousStatus?.toString()];
-
-      if (candidate.ResumeStage.Value === 1) { // Rejected
-        // Add to rejected count of the previous stage
-        if (previousStage && stageData[previousStage]) {
-          stageData[previousStage].rejected++;
-        }
-      } else if (currentStage && stageData[currentStage]) {
-        // Add to active count of current stage
-        stageData[currentStage].active++;
-      }
-    });
-
-    // Convert to array and sort by stage order
-    return Object.values(stageData)
-      .filter(data => data.active > 0 || data.rejected > 0) // Only include stages with data
-      .sort((a, b) => 
-        (pipelineStageOrder[a.stage] || 999) - (pipelineStageOrder[b.stage] || 999)
-      );
-  }, [filteredData, filteredMonthlyData]);
-
-  // Restore the original channelChartData calculation
-  const channelChartData = useMemo(() => {
-    // Check if we have filtered data
-    if (!filteredData || !filteredData.candidatesByChannel) {
-      return [];
-    }
-    
-    // Create a map to aggregate channel data
-    const channelMap = {};
-    
-    // Process each month's data
-    Object.entries(filteredData.candidatesByChannel).forEach(([month, channels]) => {
-      // Process each channel in this month
-      Object.entries(channels).forEach(([channelName, candidateIds]) => {
-        // Filter candidates by selected jobs if any are selected
-        const relevantCandidates = candidateIds.filter(id => {
-          const candidate = filteredData.candidateData[id];
-          // If no jobs are selected, include all candidates
-          if (!selectedJobs.length) return true;
-          // Otherwise, only include candidates from selected jobs
-          return candidate && selectedJobs.includes(candidate.Parent.ParentId);
-        });
-        
-        // Skip if no relevant candidates after filtering
-        if (relevantCandidates.length === 0) return;
-        
-        // Determine display name based on source type logic
-        let displayName = channelName;
-        
-        // Format specific source names
-        if (channelName === "naukri") displayName = "Naukri";
-        if (channelName === "linkedin") displayName = "LinkedIn";
-        if (channelName === "referral") displayName = "Referral";
-        if (channelName === "CareerPage") displayName = "Career Page";
-        
-        // Initialize or update the channel in our map
-        if (!channelMap[displayName]) {
-          channelMap[displayName] = {
-            name: displayName,
-            value: 0,
-            candidates: []
-          };
-        }
-        
-        // Add these candidates to the channel
-        channelMap[displayName].candidates.push(...relevantCandidates);
-        channelMap[displayName].value = channelMap[displayName].candidates.length;
-      });
-    });
-    
-    // Convert the map to an array for the pie chart
-    return Object.values(channelMap)
-      .filter(channel => channel.value > 0)
-      .map(channel => ({
-        id: channel.name,
-        label: channel.name,
-        value: channel.value,
-        color: channelColors[channel.name] || '#6366f1',
-      }))
-      .sort((a, b) => b.value - a.value); // Sort by value descending
-  }, [filteredData, selectedJobs]);
-
-  // Update the conversionRatesData to use filtered data
-  const conversionRatesData = useMemo(() => {
-    if (!filteredData || !filteredData.candidateData) return [];
-    
-    // Define the pipeline stages in order
-    const pipelineStages = [
-      "Pool",
-      "HR Screening",
-      "Xobin Test",
-      "L1 Interview",
-      "L2 Interview",
-      "Final Round",
-      "HR Round",
-      "Pre Offer Documentation",
-      "Offer Approval",
-      "Offer",
-      "Nurturing Campaign",
-      "Hired"
-    ];
-    
-    // Create stage data structure
-    const stageData = {};
-    pipelineStages.forEach(stage => {
-      stageData[stage] = {
-        active: 0,      // Candidates currently at this stage
-        rejected: 0,    // Candidates rejected at this stage
-        total: 0        // Total candidates who reached this stage (for calculating percentages)
-      };
-    });
-    
-    // Count candidates at each stage
-    Object.values(filteredData.candidateData).forEach(candidate => {
-      // Skip candidates that don't match selected jobs
-      if (selectedJobs.length > 0 && !selectedJobs.includes(candidate.Parent.ParentId)) {
-        return;
-      }
-      
-      const stageValue = candidate.ResumeStage.Value.toString();
-      const stageName = stageMapping[stageValue] || "Unknown";
-      
-      // Skip unknown stages
-      if (stageName === "Unknown" || !pipelineStages.includes(stageName) && stageName !== "Reject") {
-        return;
-      }
-      
-      // For rejected candidates, increment the rejected count for their previous stage
-      if (stageName === "Reject" && candidate.ResumeStage.previousStatus) {
-        const previousStageName = stageMapping[candidate.ResumeStage.previousStatus.toString()];
-        if (previousStageName && stageData[previousStageName]) {
-          stageData[previousStageName].rejected++;
-          stageData[previousStageName].total++;
-        }
-      } 
-      // For active candidates, increment the active count for their current stage
-      else if (stageData[stageName]) {
-        stageData[stageName].active++;
-        stageData[stageName].total++;
-        
-        // Also increment the total for all previous stages
-        // This helps us track how many candidates reached each stage
-        const stageIndex = pipelineStages.indexOf(stageName);
-        for (let i = 0; i < stageIndex; i++) {
-          stageData[pipelineStages[i]].total++;
-        }
-      }
-    });
-    
-    // Calculate conversion rates
-    const result = [];
-    
-    // Skip the first stage (Pool) for selection rate calculation
-    for (let i = 1; i < pipelineStages.length; i++) {
-      const currentStage = pipelineStages[i];
-      const previousStage = pipelineStages[i-1];
-      
-      // Get data for current and previous stages
-      const currentStageData = stageData[currentStage];
-      const previousStageData = stageData[previousStage];
-      
-      // Calculate selection rate: (candidates who reached this stage) / (candidates who reached previous stage)
-      const selectionRate = previousStageData.total > 0 
-        ? Math.round((currentStageData.total / previousStageData.total) * 100) 
-        : 0;
-      
-      // Calculate rejection rate: (candidates rejected at this stage) / (total candidates who reached this stage)
-      const rejectionRate = currentStageData.total > 0 
-        ? Math.round((currentStageData.rejected / currentStageData.total) * 100) 
-        : 0;
-      
-      result.push({
-        stage: currentStage,
-        selectionRate,
-        rejectionRate
-      });
-    }
-    
-    return result;
-  }, [filteredData, selectedJobs, stageMapping]);
-
-  // Update the monthlyTrendsData to use filtered data
-  const monthlyTrendsData = useMemo(() => {
-    if (filteredMonthlyData.length) {
-      return filteredMonthlyData.map(month => ({
-        month: month.month,
-        activePipeline: month.activePipeline,
-        offers: month.totalOffers,
-        rejected: month.totalRejected,
-      }));
-    }
-    
-    return []; // Return empty array if no data
-  }, [filteredMonthlyData]);
-
-  // Add channelDetailData calculation without affecting the existing channelChartData
-  const channelDetailData = useMemo(() => {
-    // Check if we have filtered data
-    if (!filteredData || !filteredData.candidatesByChannel) {
-      return [];
-    }
-    
-    // Create a map to aggregate channel data
-    const channelMap = {};
-    
-    // Process each month's data
-    Object.entries(filteredData.candidatesByChannel).forEach(([month, channels]) => {
-      // Process each channel in this month
-      Object.entries(channels).forEach(([channelName, candidateIds]) => {
-        // Filter candidates by selected jobs if any are selected
-        const relevantCandidates = candidateIds.filter(id => {
-          const candidate = filteredData.candidateData[id];
-          // If no jobs are selected, include all candidates
-          if (!selectedJobs.length) return true;
-          // Otherwise, only include candidates from selected jobs
-          return candidate && selectedJobs.includes(candidate.Parent.ParentId);
-        });
-        
-        // Skip if no relevant candidates after filtering
-        if (relevantCandidates.length === 0) return;
-        
-        // Determine display name based on source type logic
-        let displayName = channelName;
-        
-        // Format specific source names
-        if (channelName === "naukri") displayName = "Naukri";
-        if (channelName === "linkedin") displayName = "LinkedIn";
-        if (channelName === "referral") displayName = "Referral";
-        if (channelName === "CareerPage") displayName = "Career Page";
-        
-        // Initialize or update the channel in our map
-        if (!channelMap[displayName]) {
-          channelMap[displayName] = {
-            name: displayName,
-            total: 0,
-            active: 0,
-            offers: 0,
-            rejected: 0,
-            candidates: []
-          };
-        }
-        
-        // Add these candidates to the channel
-        channelMap[displayName].candidates.push(...relevantCandidates);
-      });
-    });
-    
-    // Calculate metrics for each channel
-    Object.values(channelMap).forEach(channel => {
-      channel.total = channel.candidates.length;
-      
-      // Count by status
-      channel.candidates.forEach(id => {
-        const candidate = filteredData.candidateData[id];
-        if (!candidate) return;
-        
-        const stageName = stageMapping[candidate.ResumeStage.Value.toString()] || "Unknown";
-        
-        if (candidate.ResumeStage.Value === 1) {
-          channel.rejected++;
-        } else if (["Offer", "Nurturing Campaign", "Hired"].includes(stageName)) {
-          channel.offers++;
-        } else {
-          channel.active++;
-        }
-      });
-      
-      // Calculate rates
-      channel.selectionRate = channel.total > 0 
-        ? `${Math.round((channel.offers / channel.total) * 100)}%` 
-        : '0%';
-      
-      channel.rejectionRate = channel.total > 0 
-        ? `${Math.round((channel.rejected / channel.total) * 100)}%` 
-        : '0%';
-    });
-    
-    // Convert to array and sort by total descending
-    return Object.values(channelMap)
-      .sort((a, b) => b.total - a.total);
-      
-  }, [filteredData, selectedJobs]);
-
-  // Calculate conversion rate
-  const conversionRate = useMemo(() => {
-    if (!filteredData) return '0%';
-    
-    const totalApplicants = filteredData.monthlyData.reduce(
-      (sum, month) => sum + month.totalApplicants, 0
-    );
-    
-    const totalOffers = filteredData.monthlyData.reduce(
-      (sum, month) => sum + month.totalOffers, 0
-    );
-    
-    return totalApplicants > 0 
-      ? `${Math.round((totalOffers / totalApplicants) * 100)}%` 
-      : '0%';
-  }, [filteredData]);
-
   return (
     <div className="container mx-auto py-8 px-4">
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold">Recruitment Dashboard</h1>
-        <Button 
-          variant="outline" 
+        <Button
+          variant="outline"
           size="icon"
           onClick={() => setSettingsOpen(true)}
           title="API Settings"
@@ -952,19 +609,19 @@ export default function Dashboard() {
           <Settings className="h-4 w-4" />
         </Button>
       </div>
-      
+
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList className="mb-6">
           <TabsTrigger value="overview">Overview</TabsTrigger>
           <TabsTrigger value="referrals">Referrals</TabsTrigger>
         </TabsList>
-        
+
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center space-x-4">
             <MonthSelector selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth} />
-            
+
             {dashboardData && (
-              <JobFilter 
+              <JobFilter
                 jobs={Object.entries(dashboardData.jobData).map(([id, job]) => ({
                   id,
                   name: job.name,
@@ -976,7 +633,7 @@ export default function Dashboard() {
             )}
           </div>
         </div>
-        
+
         {loading ? (
           <div className="flex items-center justify-center h-64">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-500"></div>
@@ -990,7 +647,7 @@ export default function Dashboard() {
             <TabsContent value="overview" className="mt-0">
               {/* Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-                <Card 
+                <Card
                   className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
                   onClick={() => {
                     if (!filteredData) return;
@@ -1003,18 +660,21 @@ export default function Dashboard() {
                 >
                   <h3 className="text-sm font-medium text-gray-500">Total Applicants</h3>
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
-                    {filteredMonthlyData.reduce((sum, item) => sum + item.totalApplicants, 0)}
+                    {filteredData?.totalApplicants || 0}
                   </p>
                 </Card>
-                
-                <Card 
+
+                <Card
                   className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
                   onClick={() => {
                     if (!filteredData) return;
-                    // Get candidates in active pipeline
                     const activeCandidates = Object.values(filteredData.candidateData || {})
-                      .filter(c => c.ResumeStage.Value !== 1 && c.ResumeStage.Value !== 5 && c.ResumeStage.Value !== 19 && c.ResumeStage.Value !== 6); // Not rejected
-                    
+                      .filter(c => {
+                        const stageName = stageMapping[c.ResumeStage.Value.toString()];
+                        return c.ResumeStage.Value !== 1 && // Not rejected
+                          !["Offer", "Nurturing Campaign", "Hired"].includes(stageName); // Not in offer stages
+                      });
+
                     handleCandidateClick(
                       activeCandidates.map(c => c.ResumeId),
                       'Active Pipeline'
@@ -1023,21 +683,21 @@ export default function Dashboard() {
                 >
                   <h3 className="text-sm font-medium text-gray-500">Active Pipeline</h3>
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
-                    {filteredMonthlyData.reduce((sum, item) => sum + item.activePipeline, 0)}
+                    {filteredData?.activePipeline || 0}
+
                   </p>
                 </Card>
-                
-                <Card 
+
+                <Card
                   className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
                   onClick={() => {
                     if (!filteredData) return;
-                    // Get candidates with offers
                     const offerCandidates = Object.values(filteredData.candidateData || {})
                       .filter(c => {
-                        const stageName = c.ResumeStage.Name;
-                        return stageName === 'Offer' || stageName === 'Nurturing Campaign' || stageName === 'Hired';
+                        const stageName = stageMapping[c.ResumeStage.Value.toString()];
+                        return ["Offer", "Nurturing Campaign", "Hired"].includes(stageName);
                       });
-                    
+
                     handleCandidateClick(
                       offerCandidates.map(c => c.ResumeId),
                       'Offers'
@@ -1046,18 +706,17 @@ export default function Dashboard() {
                 >
                   <h3 className="text-sm font-medium text-gray-500">Total Offers</h3>
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
-                    {filteredMonthlyData.reduce((sum, item) => sum + item.totalOffers, 0)}
+                    {filteredData?.totalOffers || 0}
                   </p>
                 </Card>
-                
-                <Card 
+
+                <Card
                   className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
                   onClick={() => {
                     if (!filteredData) return;
-                    // Get rejected candidates
                     const rejectedCandidates = Object.values(filteredData.candidateData || {})
                       .filter(c => c.ResumeStage.Value === 1);
-                    
+
                     handleCandidateClick(
                       rejectedCandidates.map(c => c.ResumeId),
                       'Rejected Candidates'
@@ -1066,7 +725,7 @@ export default function Dashboard() {
                 >
                   <h3 className="text-sm font-medium text-gray-500">Total Rejected</h3>
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
-                    {filteredMonthlyData.reduce((sum, item) => sum + item.totalRejected, 0)}
+                    {filteredData?.totalRejected || 0}
                   </p>
                 </Card>
 
@@ -1075,7 +734,7 @@ export default function Dashboard() {
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-sm font-medium text-gray-500">Conversion Rate</p>
-                      <h3 className="text-2xl font-bold text-gray-900 mt-1">{conversionRate}</h3>
+                      <h3 className="text-2xl font-bold text-gray-900 mt-1">{0}</h3>
                     </div>
                     <div className="p-2 bg-purple-50 rounded-full">
                       <BarChart className="h-5 w-5 text-purple-500" />
@@ -1086,16 +745,16 @@ export default function Dashboard() {
                   </div>
                 </Card>
               </div>
-              
+
               {/* Add the charts section */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 {/* Recruitment Pipeline */}
                 <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Recruitment Pipeline</h3>
                   <div className="h-80">
-                    {pipelineChartData.length > 0 ? (
+                    {filteredData.pipelineChartData.length > 0 ? (
                       <ResponsiveBar
-                        data={pipelineChartData}
+                        data={filteredData.pipelineChartData}
                         keys={['active', 'rejected']}
                         indexBy="stage"
                         margin={{ top: 10, right: 10, bottom: 100, left: 60 }}
@@ -1172,9 +831,9 @@ export default function Dashboard() {
                 <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Channel Attribution</h3>
                   <div className="h-80">
-                    {channelChartData.length > 0 ? (
+                    {filteredData.channelChartData.length > 0 ? (
                       <ResponsivePie
-                        data={channelChartData}
+                        data={filteredData.channelChartData}
                         margin={{ top: 40, right: 80, bottom: 80, left: 80 }}
                         innerRadius={0.5}
                         padAngle={0.7}
@@ -1222,9 +881,9 @@ export default function Dashboard() {
                 <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Monthly Trends</h3>
                   <div className="h-80">
-                    {monthlyTrendsData.length > 0 ? (
+                    {[].length > 0 ? (
                       <ResponsiveBar
-                        data={monthlyTrendsData}
+                        data={[]}
                         keys={['activePipeline', 'offers', 'rejected']}
                         indexBy="month"
                         margin={{ top: 20, right: 20, bottom: 80, left: 60 }}
@@ -1289,9 +948,9 @@ export default function Dashboard() {
                 <Card className="p-4 bg-white shadow-sm rounded-lg mt-6">
                   <h3 className="text-lg font-medium mb-4">Stage-wise Conversion Rates</h3>
                   <div className="h-80">
-                    {conversionRatesData.length > 0 ? (
+                    {[].length > 0 ? (
                       <ResponsiveBar
-                        data={conversionRatesData}
+                        data={[]}
                         keys={['selectionRate', 'rejectionRate']}
                         indexBy="stage"
                         margin={{ top: 10, right: 10, bottom: 100, left: 60 }}
@@ -1384,15 +1043,15 @@ export default function Dashboard() {
                       </tr>
                     </thead>
                     <tbody>
-                      {channelDetailData.map((channel, index) => (
-                        <tr 
-                          key={channel.name} 
+                      {[].map((channel, index) => (
+                        <tr
+                          key={channel.name}
                           className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}
                         >
                           <td className="py-3 px-4 font-medium">
                             <div className="flex items-center">
-                              <div 
-                                className="w-3 h-3 rounded-full mr-2" 
+                              <div
+                                className="w-3 h-3 rounded-full mr-2"
                                 style={{ backgroundColor: channelColors[channel.name] || '#6366f1' }}
                               ></div>
                               {channel.name}
@@ -1403,20 +1062,18 @@ export default function Dashboard() {
                           <td className="text-right py-3 px-4">{channel.offers}</td>
                           <td className="text-right py-3 px-4">{channel.rejected}</td>
                           <td className="text-right py-3 px-4">
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                              parseFloat(channel.selectionRate) > 50 
-                                ? 'bg-green-100 text-green-800' 
-                                : 'bg-yellow-100 text-yellow-800'
-                            }`}>
+                            <span className={`px-2 py-1 rounded-full text-xs ${parseFloat(channel.selectionRate) > 50
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-yellow-100 text-yellow-800'
+                              }`}>
                               {channel.selectionRate}
                             </span>
                           </td>
                           <td className="text-right py-3 px-4">
-                            <span className={`px-2 py-1 rounded-full text-xs ${
-                              parseFloat(channel.rejectionRate) < 50 
-                                ? 'bg-green-100 text-green-800' 
-                                : 'bg-red-100 text-red-800'
-                            }`}>
+                            <span className={`px-2 py-1 rounded-full text-xs ${parseFloat(channel.rejectionRate) < 50
+                              ? 'bg-green-100 text-green-800'
+                              : 'bg-red-100 text-red-800'
+                              }`}>
                               {channel.rejectionRate}
                             </span>
                           </td>
@@ -1427,10 +1084,10 @@ export default function Dashboard() {
                 </div>
               </Card>
             </TabsContent>
-            
+
             <TabsContent value="referrals" className="mt-0">
               {dashboardData && (
-                <ReferralDashboard 
+                <ReferralDashboard
                   referralData={dashboardData.referralData}
                   candidateData={dashboardData.candidateData}
                   selectedMonth={selectedMonth}
@@ -1444,7 +1101,7 @@ export default function Dashboard() {
           </>
         )}
       </Tabs>
-      
+
       {/* Candidate Details Modal */}
       <CandidateDetailsModal
         isOpen={modalOpen}
@@ -1453,7 +1110,7 @@ export default function Dashboard() {
         title={modalTitle}
       />
 
-      <ApiTokenSettings 
+      <ApiTokenSettings
         isOpen={settingsOpen}
         onClose={() => setSettingsOpen(false)}
         onTokenSaved={() => {

@@ -85,7 +85,9 @@ export const stageMapping: StageMapping = {
     "5": "Offer",
     "19": "Nurturing Campaign",
     "6": "Hired",
-    "1": "Reject"
+    "1": "Reject",
+    "28": "Hiring Manager Screening",
+    "23": "Panel Screening"
 };
 
   const l2SelectStages = [
@@ -1109,7 +1111,7 @@ async function fetchResumeIds(startDate: string, endDate: string): Promise<strin
       UploadedDate: {
         FilterType: "IS_BETWEEN",
         Value: {
-          StartDate: startDate,
+          StartDate: "2025-01-01",
           EndDate: endDate
         }
       },
@@ -1322,31 +1324,402 @@ async function generateDashboardData(token: string) {
     }
         
     // Step 5: Process data for dashboard
+    // const candidateData = {};
+    // const jobData = {};
+    // const monthlyDataMap = {};
+    // const candidatesByStage = {};
+    // const candidatesByChannel = {};    
+    // // Process each resume
+    // allResumes.forEach(resume => {
+    //   // Store job info
+    //   if (resume.Parent && resume.Parent.ParentId) {
+    //     jobData[resume.Parent.ParentId] = {
+    //       name: resume.Parent.Name,
+    //       code: resume.Parent.JobCode || ''
+    //     };
+    //   }
+      
+    //   // Store candidate data
+    //   candidateData[resume.ResumeId] = {
+    //     UserData: {
+    //       Name: resume.UserData.Name || '',
+    //       EmailId: resume.UserData.EmailId || '',
+    //       PhoneNumber: resume.UserData.PhoneNumber || '',
+    //       EducationList: resume.UserData.EducationList || []
+    //     },
+    //     WorkData: {
+    //       WorkDataList: resume?.WorkData?.WorkDataList || [],
+    //       TotalExperience: resume?.WorkData?.TotalExperience || 0,
+    //       isCurrentlyWorking: resume?.WorkData?.IsCurrentlyWorking || false
+    //     },
+    //     Source: resume.Source || {},
+    //     ResumeStage: {
+    //       Name: stageMapping[resume.Status] || 'Unknown',
+    //       Value: resume.Status,
+    //       previousStatus: resume.PreviousStatus
+    //     },
+    //     Parent: {
+    //       ParentId: resume.Parent.ParentId,
+    //       Type: "Job",
+    //       Name: resume.Parent.ParentName || '',
+    //       JobCode: resume.Parent.JobCode || ''
+    //     },
+    //     ResumeId: resume.ResumeId,
+    //     ResumeUrl: resume.ResumeUrl || '',
+    //     UploadDateTime: resume.UploadDateTime || ''
+    //   };
+      
+    //   // Get month from upload date
+    //   const uploadDate = new Date(resume.UploadDateTime);
+    //   const month = uploadDate.toLocaleString('en-US', { month: 'short' });
+      
+    //   // Initialize monthly data if not exists
+    //   if (!monthlyDataMap[month]) {
+    //     monthlyDataMap[month] = {
+    //       month,
+    //       totalApplicants: 0,
+    //       processed: 0,
+    //       scheduled: 0,
+    //       attended: 0,
+    //       l1Select: 0,
+    //       l1Reject: 0,
+    //       noShow: 0,
+    //       l2Scheduled: 0,
+    //       l2Selected: 0,
+    //       l2Rejected: 0,
+    //       offer: 0,
+    //       totalRejected: 0,
+    //       totalOffers: 0,
+    //       activePipeline: 0,
+    //       channelData: [],
+    //       pipelineStages: []
+    //     };
+    //   }
+      
+    //   // Initialize stage tracking
+    //   if (!candidatesByStage[month]) {
+    //     candidatesByStage[month] = {};
+    //   }
+      
+    //   // Initialize channel tracking
+    //   if (!candidatesByChannel[month]) {
+    //     candidatesByChannel[month] = {};
+    //   }
+      
+    //   // Update monthly counts
+    //   monthlyDataMap[month].totalApplicants++;
+      
+    //   // Track by stage
+    //   const stageName = stageMapping[resume.Status] || 'Unknown';
+    //   if (!candidatesByStage[month][stageName]) {
+    //     candidatesByStage[month][stageName] = [];
+    //   }
+    //   candidatesByStage[month][stageName].push(resume.ResumeId);
+      
+    //   // Track by channel
+    //   // const sourceCategory = resume.Source?.SourceCategory || 'Unknown';
+    //   const source = resume.Source?.SourceDrillDown1;
+    //   const sourceName = resume.Source?.SourceCategory === "RecruitmentPartners" ? "Recriutment Partners" : (channelCategories.includes(source) ?  source : "Others");
+
+    //   if (!candidatesByChannel[month][sourceName]) {
+    //     candidatesByChannel[month][sourceName] = [];   
+    //   }
+    //   candidatesByChannel[month][sourceName].push(resume.ResumeId);
+    //   const status = stageMapping[resume.Status];
+    //   // Update counts based on stage
+    //   if (resume.Status === 1) {
+    //     monthlyDataMap[month].totalRejected++;
+    //   } else if (status === 'Offer' || status === 'Nurturing Campaign' || status === 'Hired') {
+    //     monthlyDataMap[month].totalOffers++;
+    //     monthlyDataMap[month].offer++;
+    //   } else {
+    //     monthlyDataMap[month].activePipeline++;
+    //   }
+      
+    //   // Update other metrics based on stage
+    //   if (status === 'HR Screening' || status === 'Pool') {
+    //     monthlyDataMap[month].processed++;
+    //   } else if (status === 'L1 Interview') {
+    //     monthlyDataMap[month].scheduled++;
+    //   } else if (status === 'L2 Interview') {
+    //     monthlyDataMap[month].attended++;
+    //     monthlyDataMap[month].l1Select++;
+    //     monthlyDataMap[month].l2Scheduled++;
+    //   } else if (status === 'Rejected' && sourceName === 'L1 Interview') {
+    //     monthlyDataMap[month].l1Reject++;
+    //   } else if (status === 'Rejected' && sourceName === 'L2 Interview') {
+    //     monthlyDataMap[month].l2Rejected++;
+    //   }
+    // });
+    //     // Calculate percentages and format data
+    // const monthlyData = Object.values(monthlyDataMap).map(monthData => {
+    //   // Calculate channel data
+    //   if (candidatesByChannel[monthData.month]) {
+    //     monthData.channelData = Object.entries(candidatesByChannel[monthData.month]).map(([name, candidates]) => {
+    //       const active = candidates.filter(id => {
+    //         const candidate = candidateData[id];
+    //         return candidate && candidate.ResumeStage.Value !== 1; // Not rejected
+    //       }).length;
+          
+    //       const rejected = candidates.length - active;
+          
+    //       return {
+    //         name,
+    //         value: candidates.length,
+    //         active,
+    //         rejected,
+    //         percentage: `${Math.round((candidates.length / monthData.totalApplicants) * 100) || 0}%`
+    //       };
+    //     });
+    //   }
+      
+    //   // Calculate pipeline stages
+    //   if (candidatesByStage[monthData.month]) {
+    //     monthData.pipelineStages = Object.entries(candidatesByStage[monthData.month]).map(([stage, candidates]) => {
+    //       const active = candidates.filter(id => {
+    //         const candidate = candidateData[id];
+    //         return candidate && candidate.ResumeStage.Value !== 1; // Not rejected
+    //       }).length;
+          
+    //       const rejected = candidates.length - active;
+          
+    //       return {
+    //         stage,
+    //         active,
+    //         rejected
+    //       };
+    //     });
+    //   }
+      
+    //   // Calculate percentages
+    //   monthData.processedToScheduled = monthData.totalApplicants > 0 
+    //     ? `${Math.round((monthData.scheduled / monthData.totalApplicants) * 100)}%` 
+    //     : '0%';
+      
+    //   monthData.l1NoShowRate = monthData.scheduled > 0 
+    //     ? `${Math.round((monthData.noShow / monthData.scheduled) * 100)}%` 
+    //     : '0%';
+      
+    //   monthData.l1RejectionRate = monthData.scheduled > 0 
+    //     ? `${Math.round((monthData.l1Reject / monthData.scheduled) * 100)}%` 
+    //     : '0%';
+      
+    //   monthData.offerPercentage = monthData.scheduled > 0 
+    //     ? `${Math.round((monthData.offer / monthData.scheduled) * 100)}%` 
+    //     : '0%';
+      
+    //   monthData.l2RejectionRate = monthData.l2Scheduled > 0 
+    //     ? `${Math.round((monthData.l2Rejected / monthData.l2Scheduled) * 100)}%` 
+    //     : '0%';
+      
+    //   // Calculate stage conversion rates
+    //   const stageConversionRates = {};
+      
+    //   if (candidatesByStage[monthData.month]) {
+    //     Object.entries(candidatesByStage[monthData.month]).forEach(([stage, candidates]) => {
+    //       const total = candidates.length;
+    //       if (total === 0) return;
+          
+    //       const rejected = candidates.filter(id => {
+    //         const candidate = candidateData[id];
+    //         return candidate && candidate.ResumeStage.Value === 1;
+    //       }).length;
+          
+    //       const selected = total - rejected;
+          
+    //       stageConversionRates[stage] = {
+    //         selectionRate: `${Math.round((selected / total) * 100)}%`,
+    //         rejectionRate: `${Math.round((rejected / total) * 100)}%`
+    //       };
+    //     });
+    //   }
+      
+    //   monthData.stageConversionRates = stageConversionRates;
+      
+    //   return monthData;
+    // });
+    
+    // // Process referral data
+    // const referralCandidates = Object.values(candidateData).filter(c => 
+    //   c.Source.SourceCategory === "Referral"
+    // );
+    
+    // const referralSummary = [];
+    // const referralsByMonth = {};
+    
+    // // Group referrals by month
+    // referralCandidates.forEach(candidate => {
+    //   const uploadDate = new Date(candidate.UploadDateTime);
+    //   const month = uploadDate.toLocaleString('en-US', { month: 'short' });
+      
+    //   if (!referralsByMonth[month]) {
+    //     referralsByMonth[month] = [];
+    //   }
+      
+    //   referralsByMonth[month].push(candidate);
+    // });
+    
+    // // Process referrals for each month
+    // Object.entries(referralsByMonth).forEach(([month, candidates]) => {
+    //   const monthReferralSummary = {
+    //     month,
+    //     totalReferrals: candidates.length,
+    //     referrers: [],
+    //     stages: [],
+    //     conversionRate: '0%'
+    //   };
+      
+    //   // Group by referrer
+    //   const referrerMap = {};
+    //   candidates.forEach(candidate => {
+    //     const referrer = candidate.Source.SourceDrillDown2 || "Unknown";
+    //     if (!referrerMap[referrer]) {
+    //       referrerMap[referrer] = [];
+    //     }
+    //     referrerMap[referrer].push(candidate.ResumeId);
+    //   });
+      
+    //   // Create referrers array
+    //   monthReferralSummary.referrers = Object.entries(referrerMap).map(([name, ids]) => ({
+    //     name,
+    //     count: ids.length,
+    //     percentage: `${Math.round((ids.length / candidates.length) * 100)}%`,
+    //     candidates: ids
+    //   }));
+      
+    //   // Group by stage
+    //   const stageMap = {};
+    //   candidates.forEach(candidate => {
+    //     const stage = candidate.ResumeStage.Name;
+    //     if (!stageMap[stage]) {
+    //       stageMap[stage] = [];
+    //     }
+    //     stageMap[stage].push(candidate.ResumeId);
+    //   });
+      
+    //   // Create stages array
+    //   monthReferralSummary.stages = Object.entries(stageMap).map(([stage, ids]) => ({
+    //     stage,
+    //     count: ids.length,
+    //     percentage: `${Math.round((ids.length / candidates.length) * 100)}%`,
+    //     candidates: ids
+    //   }));
+      
+    //   // Calculate conversion rate
+    //   const offerStages = ["Offer", "Nurturing Campaign", "Hired"];
+    //   const offersCount = monthReferralSummary.stages
+    //     .filter(s => offerStages.includes(s.stage))
+    //     .reduce((sum, stage) => sum + stage.count, 0);
+      
+    //   monthReferralSummary.conversionRate = `${Math.round((offersCount / candidates.length) * 100)}%`;
+      
+    //   referralSummary.push(monthReferralSummary);
+    // });
+    
+    // // Find top referrers across all months
+    // const allReferrers = {};
+    // referralCandidates.forEach(candidate => {
+    //   const referrer = candidate.Source.SourceDrillDown2 || "Unknown";
+    //   if (!allReferrers[referrer]) {
+    //     allReferrers[referrer] = [];
+    //   }
+    //   allReferrers[referrer].push(candidate.ResumeId);
+    // });
+    
+    // const topReferrers = Object.entries(allReferrers)
+    //   .map(([name, candidates]) => ({
+    //     name,
+    //     count: candidates.length,
+    //     percentage: `${Math.round((candidates.length / referralCandidates.length || 1) * 100)}%`,
+    //     candidates
+    //   }))
+    //   .sort((a, b) => b.count - a.count)
+    //   .slice(0, 10);
+    
+    // // Sort monthly data by month (most recent first)
+    // monthlyData.sort((a, b) => {
+    //   const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+    //   return months.indexOf(b.month) - months.indexOf(a.month);
+    // });
+        
+    // return { 
+    //   data: {
+    //     monthlyData,
+    //     jobData,
+    //     candidatesByStage,
+    //     candidatesByChannel,
+    //     referralData: {
+    //       summary: referralSummary,
+    //       topReferrers
+    //     },
+    //     candidateData
+    //   }
+    // };
+
+
     const candidateData = {};
+    const allDatas = {};
     const jobData = {};
     const monthlyDataMap = {};
     const candidatesByStage = {};
-    const candidatesByChannel = {};
-    const jobSpecificData = [];
-
-    
-    
+    const candidatesByChannel = {};   
+    const refferals = {}; 
+    const offers = {};
     // Process each resume
     allResumes.forEach(resume => {
       // Store job info
+      if(resume.Status == 23) {
+        console.log("resume", resume)
+      }
 
-      if(resume.Parent && resume.Parent.ParentId === "c64b2bf3-09ef-426d-9f9e-608c40590ae2") {
-        jobSpecificData.push(resume);
-    }
       if (resume.Parent && resume.Parent.ParentId) {
         jobData[resume.Parent.ParentId] = {
           name: resume.Parent.Name,
           code: resume.Parent.JobCode || ''
         };
       }
-      
-      // Store candidate data
-      candidateData[resume.ResumeId] = {
+      const uploadDate = new Date(resume.UploadDateTime);
+      const month = uploadDate.toLocaleString('en-US', { month: 'short' });
+
+      if(!allDatas[`${month}_${resume.Parent.ParentId}`]) {
+        allDatas[`${month}_${resume.Parent.ParentId}`] = {
+          totalApplicants: 0,
+          totalRejected: 0,
+          totalOffers:0,
+          activePipeline:0,
+          channel: {},
+        };
+      }
+
+      const allMap = allDatas[`${month}_${resume.Parent.ParentId}`];
+
+      allMap.totalApplicants++;
+      const status = stageMapping[resume.Status];
+
+      if (resume.Status === 1) {
+        allMap.totalRejected++;
+      } else if (status === 'Offer' || status === 'Nurturing Campaign' || status === 'Hired') {
+        allMap.totalOffers++;
+        allMap.offer++;
+        if(!offers[month]){
+          offers[month] = 0;
+        }
+        offers[month]++;
+
+      } else {
+        allMap.activePipeline++;
+      }
+
+      const source = resume.Source?.SourceDrillDown1;
+      const sourceName = resume.Source?.SourceCategory === "RecruitmentPartners" ? "Recriutment Partners" : (channelCategories.includes(source) ?  source : "Others");
+
+      if(!allMap["channel"][sourceName]){
+        allMap["channel"][sourceName] = 0;
+      }
+
+      allMap["channel"][sourceName]++;
+
+      const userData = {
         UserData: {
           Name: resume.UserData.Name || '',
           EmailId: resume.UserData.EmailId || '',
@@ -1374,293 +1747,28 @@ async function generateDashboardData(token: string) {
         ResumeUrl: resume.ResumeUrl || '',
         UploadDateTime: resume.UploadDateTime || ''
       };
-      
-      // Get month from upload date
-      const uploadDate = new Date(resume.UploadDateTime);
-      const month = uploadDate.toLocaleString('en-US', { month: 'short' });
-      
-      // Initialize monthly data if not exists
-      if (!monthlyDataMap[month]) {
-        monthlyDataMap[month] = {
-          month,
-          totalApplicants: 0,
-          processed: 0,
-          scheduled: 0,
-          attended: 0,
-          l1Select: 0,
-          l1Reject: 0,
-          noShow: 0,
-          l2Scheduled: 0,
-          l2Selected: 0,
-          l2Rejected: 0,
-          offer: 0,
-          totalRejected: 0,
-          totalOffers: 0,
-          activePipeline: 0,
-          channelData: [],
-          pipelineStages: []
-        };
-      }
-      
-      // Initialize stage tracking
-      if (!candidatesByStage[month]) {
-        candidatesByStage[month] = {};
-      }
-      
-      // Initialize channel tracking
-      if (!candidatesByChannel[month]) {
-        candidatesByChannel[month] = {};
-      }
-      
-      // Update monthly counts
-      monthlyDataMap[month].totalApplicants++;
-      
-      // Track by stage
-      const stageName = stageMapping[resume.Status] || 'Unknown';
-      if (!candidatesByStage[month][stageName]) {
-        candidatesByStage[month][stageName] = [];
-      }
-      candidatesByStage[month][stageName].push(resume.ResumeId);
-      
-      // Track by channel
-      // const sourceCategory = resume.Source?.SourceCategory || 'Unknown';
-      const source = resume.Source?.SourceDrillDown1;
-      const sourceName = resume.Source?.SourceCategory === "RecruitmentPartners" ? "Recriutment Partners" : (channelCategories.includes(source) ?  source : "Others");
 
-      if (!candidatesByChannel[month][sourceName]) {
-        candidatesByChannel[month][sourceName] = [];   
-      }
-      candidatesByChannel[month][sourceName].push(resume.ResumeId);
-      const status = stageMapping[resume.Status];
-      // Update counts based on stage
-      if (resume.Status === 1) {
-        monthlyDataMap[month].totalRejected++;
-      } else if (status === 'Offer' || status === 'Nurturing Campaign' || status === 'Hired') {
-        monthlyDataMap[month].totalOffers++;
-        monthlyDataMap[month].offer++;
-      } else {
-        monthlyDataMap[month].activePipeline++;
-      }
-      
-      // Update other metrics based on stage
-      if (status === 'HR Screening' || status === 'Pool') {
-        monthlyDataMap[month].processed++;
-      } else if (status === 'L1 Interview') {
-        monthlyDataMap[month].scheduled++;
-      } else if (status === 'L2 Interview') {
-        monthlyDataMap[month].attended++;
-        monthlyDataMap[month].l1Select++;
-        monthlyDataMap[month].l2Scheduled++;
-      } else if (status === 'Rejected' && sourceName === 'L1 Interview') {
-        monthlyDataMap[month].l1Reject++;
-      } else if (status === 'Rejected' && sourceName === 'L2 Interview') {
-        monthlyDataMap[month].l2Rejected++;
-      }
+      // Store candidate data
+      candidateData[`${month}_${resume.Parent.ParentId}_${resume.ResumeId}`] = userData;
+
+      if(sourceName === "Referral") {
+        refferals[`${month}_${resume.Parent.ParentId}_${resume.ResumeId}`] = userData;
+      }      
     });
-        // Calculate percentages and format data
-    const monthlyData = Object.values(monthlyDataMap).map(monthData => {
-      // Calculate channel data
-      if (candidatesByChannel[monthData.month]) {
-        monthData.channelData = Object.entries(candidatesByChannel[monthData.month]).map(([name, candidates]) => {
-          const active = candidates.filter(id => {
-            const candidate = candidateData[id];
-            return candidate && candidate.ResumeStage.Value !== 1; // Not rejected
-          }).length;
-          
-          const rejected = candidates.length - active;
-          
-          return {
-            name,
-            value: candidates.length,
-            active,
-            rejected,
-            percentage: `${Math.round((candidates.length / monthData.totalApplicants) * 100) || 0}%`
-          };
-        });
-      }
-      
-      // Calculate pipeline stages
-      if (candidatesByStage[monthData.month]) {
-        monthData.pipelineStages = Object.entries(candidatesByStage[monthData.month]).map(([stage, candidates]) => {
-          const active = candidates.filter(id => {
-            const candidate = candidateData[id];
-            return candidate && candidate.ResumeStage.Value !== 1; // Not rejected
-          }).length;
-          
-          const rejected = candidates.length - active;
-          
-          return {
-            stage,
-            active,
-            rejected
-          };
-        });
-      }
-      
-      // Calculate percentages
-      monthData.processedToScheduled = monthData.totalApplicants > 0 
-        ? `${Math.round((monthData.scheduled / monthData.totalApplicants) * 100)}%` 
-        : '0%';
-      
-      monthData.l1NoShowRate = monthData.scheduled > 0 
-        ? `${Math.round((monthData.noShow / monthData.scheduled) * 100)}%` 
-        : '0%';
-      
-      monthData.l1RejectionRate = monthData.scheduled > 0 
-        ? `${Math.round((monthData.l1Reject / monthData.scheduled) * 100)}%` 
-        : '0%';
-      
-      monthData.offerPercentage = monthData.scheduled > 0 
-        ? `${Math.round((monthData.offer / monthData.scheduled) * 100)}%` 
-        : '0%';
-      
-      monthData.l2RejectionRate = monthData.l2Scheduled > 0 
-        ? `${Math.round((monthData.l2Rejected / monthData.l2Scheduled) * 100)}%` 
-        : '0%';
-      
-      // Calculate stage conversion rates
-      const stageConversionRates = {};
-      
-      if (candidatesByStage[monthData.month]) {
-        Object.entries(candidatesByStage[monthData.month]).forEach(([stage, candidates]) => {
-          const total = candidates.length;
-          if (total === 0) return;
-          
-          const rejected = candidates.filter(id => {
-            const candidate = candidateData[id];
-            return candidate && candidate.ResumeStage.Value === 1;
-          }).length;
-          
-          const selected = total - rejected;
-          
-          stageConversionRates[stage] = {
-            selectionRate: `${Math.round((selected / total) * 100)}%`,
-            rejectionRate: `${Math.round((rejected / total) * 100)}%`
-          };
-        });
-      }
-      
-      monthData.stageConversionRates = stageConversionRates;
-      
-      return monthData;
-    });
-    
-    // Process referral data
-    const referralCandidates = Object.values(candidateData).filter(c => 
-      c.Source.SourceCategory === "Referral"
-    );
-    
-    const referralSummary = [];
-    const referralsByMonth = {};
-    
-    // Group referrals by month
-    referralCandidates.forEach(candidate => {
-      const uploadDate = new Date(candidate.UploadDateTime);
-      const month = uploadDate.toLocaleString('en-US', { month: 'short' });
-      
-      if (!referralsByMonth[month]) {
-        referralsByMonth[month] = [];
-      }
-      
-      referralsByMonth[month].push(candidate);
-    });
-    
-    // Process referrals for each month
-    Object.entries(referralsByMonth).forEach(([month, candidates]) => {
-      const monthReferralSummary = {
-        month,
-        totalReferrals: candidates.length,
-        referrers: [],
-        stages: [],
-        conversionRate: '0%'
-      };
-      
-      // Group by referrer
-      const referrerMap = {};
-      candidates.forEach(candidate => {
-        const referrer = candidate.Source.SourceDrillDown2 || "Unknown";
-        if (!referrerMap[referrer]) {
-          referrerMap[referrer] = [];
-        }
-        referrerMap[referrer].push(candidate.ResumeId);
-      });
-      
-      // Create referrers array
-      monthReferralSummary.referrers = Object.entries(referrerMap).map(([name, ids]) => ({
-        name,
-        count: ids.length,
-        percentage: `${Math.round((ids.length / candidates.length) * 100)}%`,
-        candidates: ids
-      }));
-      
-      // Group by stage
-      const stageMap = {};
-      candidates.forEach(candidate => {
-        const stage = candidate.ResumeStage.Name;
-        if (!stageMap[stage]) {
-          stageMap[stage] = [];
-        }
-        stageMap[stage].push(candidate.ResumeId);
-      });
-      
-      // Create stages array
-      monthReferralSummary.stages = Object.entries(stageMap).map(([stage, ids]) => ({
-        stage,
-        count: ids.length,
-        percentage: `${Math.round((ids.length / candidates.length) * 100)}%`,
-        candidates: ids
-      }));
-      
-      // Calculate conversion rate
-      const offerStages = ["Offer", "Nurturing Campaign", "Hired"];
-      const offersCount = monthReferralSummary.stages
-        .filter(s => offerStages.includes(s.stage))
-        .reduce((sum, stage) => sum + stage.count, 0);
-      
-      monthReferralSummary.conversionRate = `${Math.round((offersCount / candidates.length) * 100)}%`;
-      
-      referralSummary.push(monthReferralSummary);
-    });
-    
-    // Find top referrers across all months
-    const allReferrers = {};
-    referralCandidates.forEach(candidate => {
-      const referrer = candidate.Source.SourceDrillDown2 || "Unknown";
-      if (!allReferrers[referrer]) {
-        allReferrers[referrer] = [];
-      }
-      allReferrers[referrer].push(candidate.ResumeId);
-    });
-    
-    const topReferrers = Object.entries(allReferrers)
-      .map(([name, candidates]) => ({
-        name,
-        count: candidates.length,
-        percentage: `${Math.round((candidates.length / referralCandidates.length || 1) * 100)}%`,
-        candidates
-      }))
-      .sort((a, b) => b.count - a.count)
-      .slice(0, 10);
-    
-    // Sort monthly data by month (most recent first)
-    monthlyData.sort((a, b) => {
-      const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-      return months.indexOf(b.month) - months.indexOf(a.month);
-    });
-        
+
+     {
+     }
+
+    console.log("offers", offers)
     return { 
       data: {
-        monthlyData,
+        candidateData,
         jobData,
-        candidatesByStage,
-        candidatesByChannel,
-        referralData: {
-          summary: referralSummary,
-          topReferrers
-        },
-        candidateData
+        refferals,
+        allDatas
       }
     };
+    console.log(allDatas)
   } catch (error) {
     console.error('Error generating dashboard data:', error);
     
