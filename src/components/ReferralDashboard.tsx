@@ -1,331 +1,453 @@
-import React, { useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveBar } from '@nivo/bar';
 import { stageMapping } from '@/utils/dataFetcher';
 import { Users, Award, BarChart, ChevronRight, Briefcase, X } from 'lucide-react';
 
-interface ReferralDashboardProps {
-  referralData: {
-    summary: {
-      month: string;
-      totalReferrals: number;
-      referrers: {
-        name: string;
-        count: number;
-        percentage: string;
-        candidates: string[];
-        candidateJobs?: { [candidateId: string]: string };
-      }[];
-      stages: {
-        stage: string;
-        count: number;
-        percentage: string;
-        candidates: string[];
-        candidateJobs?: { [candidateId: string]: string };
-      }[];
-      conversionRate: string;
-    }[];
-    topReferrers: {
-      name: string;
-      count: number;
-      percentage: string;
-      candidates: string[];
-      candidateJobs?: { [candidateId: string]: string };
-    }[];
+// Helper functions
+const getMonthString = (dateString: string) => {
+  return new Date(dateString).toLocaleString('en-US', { month: 'short' });
+};
+
+const getMonthYear = (dateString: string) => {
+  const date = new Date(dateString);
+  return `${getMonthString(dateString)}_${date.getFullYear()}`;
+};
+
+// Add calculateConversionRate as a helper function
+const calculateConversionRate = (
+  stages: Map<string, Set<string>>,
+  offerStages: string[]
+) => {
+  const totalCandidates = Array.from(stages.values())
+    .reduce((sum, candidates) => sum + candidates.size, 0);
+
+  const offeredCandidates = Array.from(stages.entries())
+    .filter(([stage]) => offerStages.includes(stage))
+    .reduce((sum, [_, candidates]) => sum + candidates.size, 0);
+
+  return totalCandidates > 0
+    ? `${Math.round((offeredCandidates / totalCandidates) * 100)}%`
+    : '0%';
+};
+
+// Add calculateTopReferrers as a helper function
+const calculateTopReferrers = (summary: any[]) => {
+  const referrerMap = new Map<string, { count: number; candidates: Set<string> }>();
+
+  summary.forEach(month => {
+    month.referrers.forEach((referrer: any) => {
+      if (!referrerMap.has(referrer.name)) {
+        referrerMap.set(referrer.name, { count: 0, candidates: new Set() });
+      }
+      const data = referrerMap.get(referrer.name)!;
+      data.count += referrer.count;
+      referrer.candidates.forEach((id: string) => data.candidates.add(id));
+    });
+  });
+
+  return Array.from(referrerMap.entries())
+    .map(([name, data]) => ({
+      name,
+      count: data.count,
+      percentage: '0%', // Calculate if needed
+      candidates: Array.from(data.candidates)
+    }))
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 10);
+};
+
+interface CandidateDataType {
+  UserData: {
+    Name: string;
+    EmailId: string;
   };
-  candidateData?: any; // Add this to access candidate data with job information
+  Source: {
+    SourceCategory: string;
+    SourceDrillDown1: string;
+    SourceDrillDown2: string;
+  };
+  ResumeStage: {
+    Name: string;
+    Value: number;
+    previousStatus: number;
+  };
+  Parent: {
+    ParentId: string;
+    Type: string;
+    Name: string;
+    JobCode: string;
+  };
+  ResumeId: string;
+  UploadDateTime: string;
+}
+
+interface ReferralDashboardProps {
+  referralData: { [key: string]: any };
   selectedMonth?: string;
   selectedJobs?: string[];
   onCandidateClick: (candidateIds: string[], title?: string) => void;
 }
 
-export default function ReferralDashboard({ 
-  referralData, 
-  candidateData,
-  selectedMonth = 'All', 
-  selectedJobs = [], 
-  onCandidateClick 
+export default function ReferralDashboard({
+  referralData,
+  selectedMonth = 'All',
+  selectedJobs = [],
+  onCandidateClick
 }: ReferralDashboardProps) {
-  // Debug logging
-  useEffect(() => {
-    console.log("ReferralDashboard props:", { 
-      selectedMonth, 
-      selectedJobs,
-      hasCandidateData: !!candidateData,
-      hasReferralData: !!referralData
-    });
-  }, [referralData, candidateData, selectedMonth, selectedJobs]);
-
-  // Define the pipeline stage order exactly as in page.tsx
-  const pipelineStageOrder = {
-    "Pool": 1,
-    "HR Screening": 2,
-    "Xobin Test": 3,
-    "L1 Interview": 4,
-    "L2 Interview": 5,
-    "Final Round": 6,
-    "HR Round": 7,
-    "Pre Offer Documentation": 8,
-    "Offer Approval": 9,
-    "Offer": 10,
-    "Nurturing Campaign": 11,
-    "Hired": 12,
-    "Reject": 13
-  };
-  
-  // Define offer stages for conversion rate calculation
+  // Define the pipeline stage order and offer stages
   const offerStages = ["Offer", "Nurturing Campaign", "Hired"];
-  
-  // Calculate total number of unique jobs
-  const totalJobCount = useMemo(() => {
-    if (!candidateData) return 0;
-    return new Set(Object.values(candidateData).map((c: any) => c.Parent.ParentId)).size;
-  }, [candidateData]);
-  
-  // Check if all jobs are selected
-  const isAllJobsSelected = useMemo(() => {
-    return selectedJobs.length === 0 || selectedJobs.length === totalJobCount;
-  }, [selectedJobs, totalJobCount]);
-  
-  // Filter data based on selected month and jobs
-  const filteredData = useMemo(() => {
-    // Start with a deep copy of the referral data
-    const result = JSON.parse(JSON.stringify(referralData));
+  const [filteredData, setFilteredData] = useState<any>({});
+
+  // // Transform candidateData into referralData format
+  // const candidateData = useMemo(() => {
+  //   if(referralData){
+  //   const data: {
+  //     [key: string]: {
+  //       referrer: { name: string };
+  //       stage: string;
+  //       resumeId: string;
+  //       jobId: string;
+  //       month: string;
+  //     }
+  //   } = {};
+
+  //   Object.keys(referralData).forEach((item) => {
+  //     const candidate = referralData[item];
+  //     const monthYear = getMonthYear(candidate.UploadDateTime);
+  //     const key = `${monthYear}_${candidate.Parent.ParentId}_${candidate.ResumeId}`;
+
+  //     data[key] = {
+  //       referrer: {
+  //         name: candidate.Source.SourceDrillDown2
+  //       },
+  //       stage: candidate.ResumeStage.Name,
+  //       resumeId: candidate.ResumeId,
+  //       jobId: candidate.Parent.ParentId,
+  //       month: monthYear
+  //     };
+
+  //   });
+
+  //   return data;
+  // }
+  // }, [referralData]);
+
+  // // Calculate total number of unique jobs
+  // const totalJobCount = useMemo(() => {
+  //   const uniqueJobs = new Set(
+  //     Object.values(candidateData)
+  //       .filter(c => c.Source?.SourceCategory === 'Referral')
+  //       .map(c => c.Parent.ParentId)
+  //   );
+  //   return uniqueJobs.size;
     
-    // Filter by month if not 'All'
-    if (selectedMonth !== 'All') {
-      result.summary = result.summary.filter((month: any) => month.month === selectedMonth);
+  // }, [candidateData]);
+
+  // // Filter referralData based on selected month and jobs
+  // const filteredReferralData = useMemo(() => {
+  //   return Object.entries(referralData).reduce((acc, [key, data]) => {
+  //     const monthMatches = selectedMonth === 'All' || data.month === selectedMonth;
+  //     const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(data.jobId);
+
+  //     if (monthMatches && jobMatches) {
+  //       acc[key] = data;
+  //     }
+  //     return acc;
+  //   }, {} as typeof referralData);
+  // }, [referralData, selectedMonth, selectedJobs]);
+
+  // // Check if all jobs are selected
+  // const isAllJobsSelected = useMemo(() => {
+  //   return selectedJobs.length === 0 || selectedJobs.length === totalJobCount;
+  // }, [selectedJobs, totalJobCount]);
+
+  // // Transform raw referral data into structured format
+  // const processedData = useMemo(() => {
+  //   const entries = Object.entries(referralData);
+  //   const monthData: Record<string, {
+  //     referrers: Map<string, Set<string>>;
+  //     stages: Map<string, Set<string>>;
+  //     totalReferrals: number;
+  //   }> = {};
+
+  //   // Filter entries based on selected jobs
+  //   const filteredEntries = entries.filter(([_, data]) => {
+  //     if (selectedJobs.length === 0) return true;
+  //     return selectedJobs.includes(data.jobId);
+  //   });
+
+  //   // Process each referral entry
+  //   filteredEntries.forEach(([_, data]) => {
+  //     const { month, referrer, stage, resumeId } = data;
+
+  //     if (!monthData[month]) {
+  //       monthData[month] = {
+  //         referrers: new Map(),
+  //         stages: new Map(),
+  //         totalReferrals: 0
+  //       };
+  //     }
+
+  //     // Add to referrers
+  //     if (!monthData[month].referrers.has(referrer.name)) {
+  //       monthData[month].referrers.set(referrer.name, new Set());
+  //     }
+  //     monthData[month].referrers.get(referrer.name)?.add(resumeId);
+
+  //     // Add to stages
+  //     if (!monthData[month].stages.has(stage)) {
+  //       monthData[month].stages.set(stage, new Set());
+  //     }
+  //     monthData[month].stages.get(stage)?.add(resumeId);
+
+  //     monthData[month].totalReferrals++;
+  //   });
+
+  //   // Convert to the expected format
+  //   const summary = Object.entries(monthData).map(([month, data]) => ({
+  //     month,
+  //     totalReferrals: data.totalReferrals,
+  //     referrers: Array.from(data.referrers.entries()).map(([name, candidates]) => ({
+  //       name,
+  //       count: candidates.size,
+  //       percentage: `${Math.round((candidates.size / data.totalReferrals) * 100)}%`,
+  //       candidates: Array.from(candidates)
+  //     })),
+  //     stages: Array.from(data.stages.entries()).map(([stage, candidates]) => ({
+  //       stage,
+  //       count: candidates.size,
+  //       percentage: `${Math.round((candidates.size / data.totalReferrals) * 100)}%`,
+  //       candidates: Array.from(candidates)
+  //     })),
+  //     conversionRate: calculateConversionRate(data.stages, offerStages)
+  //   }));
+
+  //   // Filter by selected month if not 'All'
+  //   const filteredSummary = selectedMonth === 'All'
+  //     ? summary
+  //     : summary.filter(m => m.month === selectedMonth);
+
+  //   return {
+  //     summary: filteredSummary,
+  //     topReferrers: calculateTopReferrers(filteredSummary)
+  //   };
+  // }, [referralData, selectedJobs, selectedMonth, offerStages]);
+
+  // // Get current month data
+  // const currentMonth = processedData.summary[0] || {
+  //   month: '',
+  //   totalReferrals: 0,
+  //   referrers: [],
+  //   stages: [],
+  //   conversionRate: '0%'
+  // };
+
+
+
+  // // Calculate total offers across all filtered months
+  // const totalOffers = useMemo(() => {
+  //   return processedData.summary.reduce((sum, month) => {
+  //     // Sum up candidates in offer stages
+  //     return sum + month.stages
+  //       .filter(stage => offerStages.includes(stage.stage))
+  //       .reduce((stageSum, stage) => stageSum + stage.count, 0);
+  //   }, 0);
+  // }, [processedData, offerStages]);
+
+  // // Calculate conversion rate
+  // const conversionRate = useMemo(() => {
+  //   return totalReferrals > 0 ? `${Math.round((totalOffers / totalReferrals) * 100)}%` : '0%';
+  // }, [totalReferrals, totalOffers]);
+
+  // // Calculate total rejections across all filtered months
+  // const totalRejections = useMemo(() => {
+  //   return processedData.summary.reduce((sum, month) => {
+  //     // Find the reject stage if it exists
+  //     const rejectStage = month.stages.find(stage => stage.stage === "Reject");
+  //     return sum + (rejectStage?.count || 0);
+  //   }, 0);
+  // }, [processedData]);
+
+  // // Prepare data for monthly trend chart
+  // const monthlyTrendData = processedData.summary
+  //   .slice()
+  //   .reverse()
+  //   .map(month => ({
+  //     month: month.month,
+  //     referrals: month.totalReferrals,
+  //     conversionRate: parseFloat(month.conversionRate.replace('%', ''))
+  //   }));
+
+  // // Process pipeline data
+  // const pipelineData = useMemo(() => {
+  //   const stageMap = new Map<string, {
+  //     stage: string;
+  //     active: number;
+  //     rejected: number;
+  //     activeCandidates: string[];
+  //     rejectedCandidates: string[];
+  //   }>();
+
+  //   // Initialize stages
+  //   Object.keys(stageMapping).forEach(stage => {
+  //     stageMap.set(stage, {
+  //       stage,
+  //       active: 0,
+  //       rejected: 0,
+  //       activeCandidates: [],
+  //       rejectedCandidates: []
+  //     });
+  //   });
+
+  //   // Process each candidate
+  //   Object.values(filteredReferralData).forEach(data => {
+  //     const candidate = candidateData[data.resumeId];
+
+  //     if (data.stage === "Reject") {
+  //       // Handle rejected candidates
+  //       const previousStage = candidate.ResumeStage.previousStatus?.toString();
+  //       const stageName = previousStage ? (stageMapping[previousStage] || "Pool") : "Pool";
+
+  //       if (stageMap.has(stageName)) {
+  //         const stageData = stageMap.get(stageName)!;
+  //         stageData.rejected++;
+  //         stageData.rejectedCandidates.push(data.resumeId);
+  //       }
+  //     } else {
+  //       // Handle active candidates
+  //       if (stageMap.has(data.stage)) {
+  //         const stageData = stageMap.get(data.stage)!;
+  //         stageData.active++;
+  //         stageData.activeCandidates.push(data.resumeId);
+  //       }
+  //     }
+  //   });
+
+  //   return Array.from(stageMap.values());
+  // }, [filteredReferralData, candidateData, stageMapping]);
+
+  // // If no data is available after filtering
+  // if (processedData.summary.length === 0) {
+  //   return (
+  //     <div className="flex items-center justify-center h-64">
+  //       <p className="text-gray-500">No referral data available for the selected filters.</p>
+  //     </div>
+  //   );
+  // }
+
+  // // Determine what to display for the job selection
+  // const jobSelectionDisplay = isAllJobsSelected ? "All Jobs" :
+  //   selectedJobs.length === 1 ? candidateData[Object.keys(candidateData).find(id =>
+  //     candidateData[id].Parent.ParentId === selectedJobs[0]
+  //   ) || '']?.Parent?.Name || "Selected Job" :
+  //     `${selectedJobs.length} Jobs Selected`;
+  useEffect(() => {
+    if (referralData) {
+      calculateFilteredData();
     }
-    
-    // Filter by jobs if any are selected and not all jobs
-    if (selectedJobs.length > 0 && !isAllJobsSelected) {
-      // Filter each month's referrers and stages
-      result.summary = result.summary.map((month: any) => {
-        // Filter referrers
-        const filteredReferrers = month.referrers.map((referrer: any) => {
-          return {
-            ...referrer,
-            candidates: referrer.candidates.filter((candidateId: string) => {
-              const candidate = candidateData[candidateId];
-              return candidate && selectedJobs.includes(candidate.Parent.ParentId);
-            })
-          };
-        }).filter((referrer: any) => referrer.candidates.length > 0);
-        
-        // Recalculate counts
-        const filteredReferrerCounts = filteredReferrers.map((referrer: any) => ({
-          ...referrer,
-          count: referrer.candidates.length
-        }));
-        
-        // Filter stages
-        const filteredStages = month.stages.map((stage: any) => {
-          return {
-            ...stage,
-            candidates: stage.candidates.filter((candidateId: string) => {
-              const candidate = candidateData[candidateId];
-              return candidate && selectedJobs.includes(candidate.Parent.ParentId);
-            })
-          };
-        }).filter((stage: any) => stage.candidates.length > 0);
-        
-        // Recalculate counts and percentages
-        const totalFilteredCandidates = filteredStages.reduce((sum: number, stage: any) => sum + stage.candidates.length, 0);
-        const filteredStageCounts = filteredStages.map((stage: any) => ({
-          ...stage,
-          count: stage.candidates.length,
-          percentage: totalFilteredCandidates > 0 ? `${Math.round((stage.candidates.length / totalFilteredCandidates) * 100)}%` : '0%'
-        }));
-        
-        // Calculate conversion rate for filtered data - include all offer stages
-        const totalOfferCount = filteredStageCounts
-          .filter((s: any) => offerStages.includes(s.stage))
-          .reduce((sum: number, stage: any) => sum + stage.count, 0);
-        
-        const totalCount = filteredReferrerCounts.reduce((sum: number, referrer: any) => sum + referrer.count, 0);
-        
-        const filteredConversionRate = totalCount > 0 ? `${Math.round((totalOfferCount / totalCount) * 100)}%` : '0%';
-        
-        return {
-          ...month,
-          referrers: filteredReferrerCounts,
-          stages: filteredStageCounts,
-          totalReferrals: totalCount,
-          conversionRate: filteredConversionRate
-        };
-      }).filter((month: any) => month.totalReferrals > 0);
+
+  }, [selectedJobs, selectedMonth])
+
+  const calculateFilteredData = () => {
+    const values = {
+      totalApplicants: 0,
+      activePipeline: 0,
+      totalOffers: 0,
+      totalRejected: 0,
+      conversionRate: 0,
+      pipelineStages: {},
+      channelAttr: {},
+      pipelineChartData: [],
+      topReferrers: {},
+      monthlyTrendData: []
     }
-    
-    // Calculate top referrers across all filtered months
-    const allReferrers: Record<string, any> = {};
-    result.summary.forEach((month: any) => {
-      month.referrers.forEach((referrer: any) => {
-        if (!allReferrers[referrer.name]) {
-          allReferrers[referrer.name] = {
-            name: referrer.name,
+
+    Object.keys(referralData).map((item) => {
+      const data = referralData[item];
+      const [itemMonth, itemJobId] = item.split('_');
+
+      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+
+      if ((monthMatches && jobMatches)) {
+        values.totalApplicants += 1;
+
+        if (data.ResumeStage.Value === 1) {
+          values.totalRejected++;
+        } else if (stageMapping[data.ResumeStage.Value] === 'Offer' || stageMapping[data.ResumeStage.Value] === 'Nurturing Campaign' || stageMapping[data.ResumeStage.Value] === 'Hired') {
+          values.totalOffers++;
+
+        } else {
+          values.activePipeline++;
+        }
+
+        const currentStage = stageMapping[data.ResumeStage.Value];
+        const previousStage = stageMapping[data.ResumeStage.previousStatus];
+
+        if (data.ResumeStage.Value === 1) {
+          if (!values.pipelineStages[previousStage]) {
+            values.pipelineStages[previousStage] = {
+              stage: previousStage,
+              active: 0,
+              rejected: 0
+            }
+          }
+          values.pipelineStages[previousStage].rejected++;
+        } else {
+          if (!values.pipelineStages[currentStage]) {
+            values.pipelineStages[currentStage] = {
+              stage: currentStage,
+              active: 0,
+              rejected: 0
+            }
+          }
+          values.pipelineStages[currentStage].active++;
+        }
+
+        if (!values.topReferrers[data.Source.SourceDrillDown2]) {
+          values.topReferrers[data.Source.SourceDrillDown2] = {
+            name: data.Source.SourceDrillDown2,
             count: 0,
             candidates: []
-          };
+          }
         }
-        allReferrers[referrer.name].count += referrer.count;
-        allReferrers[referrer.name].candidates = [
-          ...allReferrers[referrer.name].candidates,
-          ...referrer.candidates
-        ];
-      });
-    });
-    
-    // Sort and limit top referrers
-    result.topReferrers = Object.values(allReferrers)
-      .sort((a: any, b: any) => b.count - a.count)
-      .slice(0, 10);
-    
-    return result;
-  }, [referralData, selectedMonth, selectedJobs, candidateData, isAllJobsSelected, offerStages]);
-  
-  // Get current month data
-  const currentMonth = filteredData.summary[0] || { 
-    month: '',
-    totalReferrals: 0,
-    referrers: [],
-    stages: [],
-    conversionRate: '0%'
-  };
-  
-  // Calculate total referrals across all filtered months
-  const totalReferrals = useMemo(() => {
-    return filteredData.summary.reduce((sum, month) => sum + month.totalReferrals, 0);
-  }, [filteredData]);
-  
-  // Calculate total offers across all filtered months
-  const totalOffers = useMemo(() => {
-    return filteredData.summary.reduce((sum, month) => {
-      // Sum up candidates in offer stages
-      return sum + month.stages
-        .filter(stage => offerStages.includes(stage.stage))
-        .reduce((stageSum, stage) => stageSum + stage.count, 0);
-    }, 0);
-  }, [filteredData, offerStages]);
-  
-  // Calculate conversion rate
-  const conversionRate = useMemo(() => {
-    return totalReferrals > 0 ? `${Math.round((totalOffers / totalReferrals) * 100)}%` : '0%';
-  }, [totalReferrals, totalOffers]);
-  
-  // Calculate total rejections across all filtered months
-  const totalRejections = useMemo(() => {
-    return filteredData.summary.reduce((sum, month) => {
-      // Find the reject stage if it exists
-      const rejectStage = month.stages.find(stage => stage.stage === "Reject");
-      return sum + (rejectStage?.count || 0);
-    }, 0);
-  }, [filteredData]);
-  
-  // Prepare data for monthly trend chart
-  const monthlyTrendData = filteredData.summary
-    .slice()
-    .reverse()
-    .map(month => ({
-      month: month.month,
-      referrals: month.totalReferrals,
-      conversionRate: parseFloat(month.conversionRate.replace('%', ''))
-    }));
-  
-  // Prepare data for recruitment pipeline bar chart
-  const pipelineData = useMemo(() => {
-    if (!currentMonth.stages || currentMonth.stages.length === 0) {
-      return [];
-    }
-    
-    // Get all stages in the correct order
-    const orderedStages = Object.keys(pipelineStageOrder).sort(
-      (a, b) => pipelineStageOrder[a as keyof typeof pipelineStageOrder] - pipelineStageOrder[b as keyof typeof pipelineStageOrder]
-    );
-    
-    // Create a map to store pipeline stages
-    const stageMap = new Map();
-    
-    // Initialize all stages with zero counts
-    orderedStages.forEach(stageName => {
-      stageMap.set(stageName, {
-        stage: stageName,
-        active: 0,
-        rejected: 0,
-        activeCandidates: [],
-        rejectedCandidates: []
-      });
-    });
-    
-    // Find the reject stage if it exists
-    const rejectStage = currentMonth.stages.find(s => s.stage === "Reject");
-    
-    // Process each stage to build the pipeline data
-    currentMonth.stages.forEach(stage => {
-      // Skip the reject stage as we'll handle it separately
-      if (stage.stage === "Reject") return;
-      
-      // Skip stages that don't exist in our ordered stages
-      if (!stageMap.has(stage.stage)) return;
-      
-      // Update the stage data
-      const stageData = stageMap.get(stage.stage);
-      stageData.active = stage.count;
-      stageData.activeCandidates = stage.candidates || [];
-    });
-    
-    // If we have a reject stage, distribute the rejections based on the logic in page.tsx
-    if (rejectStage && rejectStage.count > 0 && candidateData) {
-      // Get all rejected candidates
-      const rejectedCandidateIds = rejectStage.candidates || [];
-      
-      // For each rejected candidate, find where they were rejected
-      rejectedCandidateIds.forEach(candidateId => {
-        const candidate = candidateData[candidateId];
-        if (!candidate) return;
-        
-        // Get the previous stage where the candidate was rejected
-        const previousStatus = candidate.ResumeStage?.previousStatus?.toString();
-        const previousStageName = previousStatus ? (stageMapping[previousStatus] || "Pool") : "Pool";
-        
-        // Find the previous stage in our pipeline data
-        if (stageMap.has(previousStageName)) {
-          const previousStageData = stageMap.get(previousStageName);
-          previousStageData.rejected++;
-          previousStageData.rejectedCandidates.push(candidateId);
+        values.topReferrers[data.Source.SourceDrillDown2].count++;
+        values.topReferrers[data.Source.SourceDrillDown2].candidates.push(data.resumeId);
+
+        if (!values.monthlyTrendData[itemMonth]) {
+          values.monthlyTrendData[itemMonth] = {
+            month: itemMonth,
+            referrals: 0,
+            conversionRate: 0
+          }
         }
-      });
-    } else if (rejectStage && rejectStage.count > 0) {
-      // If we don't have candidateData, just add all rejections to the Pool stage
-      if (stageMap.has("Pool")) {
-        const poolStageData = stageMap.get("Pool");
-        poolStageData.rejected = rejectStage.count;
-        poolStageData.rejectedCandidates = rejectStage.candidates || [];
+        values.monthlyTrendData[itemMonth].referrals++; 
       }
-    }
+    })
+
+    Object.keys(values.pipelineStages).map((item) => {
+      const data = values.pipelineStages[item];
+      values.pipelineChartData.push(data);
+    })
+
+    values.topReferrers = Object.values(values.topReferrers)
+    .sort((a, b) => b.count - a.count)
+    .slice(0, 5)
+    .reduce((acc, referrer) => {
+      acc[referrer.name] = referrer;
+      return acc;
+    }, {});
     
-    // Convert the map to an array and maintain the order from pipelineStageOrder
-    return orderedStages
-      .filter(stageName => stageMap.has(stageName))
-      .map(stageName => stageMap.get(stageName));
-  }, [currentMonth.stages, candidateData]);
-  
-  // If no data is available after filtering
-  if (filteredData.summary.length === 0) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <p className="text-gray-500">No referral data available for the selected filters.</p>
-      </div>
-    );
+    values.monthlyTrendData = Object.values(values.monthlyTrendData)
+    .sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime());
+
+    console.log(values.monthlyTrendData);
+
+    setFilteredData(values);
   }
-  
-  // Determine what to display for the job selection
-  const jobSelectionDisplay = isAllJobsSelected ? "All Jobs" : 
-    selectedJobs.length === 1 ? candidateData[Object.keys(candidateData).find(id => 
-      candidateData[id].Parent.ParentId === selectedJobs[0]
-    ) || '']?.Parent?.Name || "Selected Job" : 
-    `${selectedJobs.length} Jobs Selected`;
-  
+
   return (
     <div className="space-y-6">
       {/* Summary Cards */}
@@ -335,43 +457,51 @@ export default function ReferralDashboard({
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Total Referrals</p>
-              <h3 className="text-2xl font-bold text-gray-900 mt-1">{totalReferrals}</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.totalApplicants}</h3>
             </div>
             <div className="p-2 bg-blue-50 rounded-full">
               <Users className="h-5 w-5 text-blue-500" />
             </div>
           </div>
-          <div 
-            className="mt-4 text-sm text-blue-600 cursor-pointer flex items-center"
-            onClick={() => {
-              // Get all candidate IDs across all months
-              const allCandidateIds = filteredData.summary.flatMap(month => 
-                month.referrers.flatMap(referrer => referrer.candidates)
-              );
-              onCandidateClick(allCandidateIds, 'All Referrals');
-            }}
-          >
+          <div className="mt-4 text-sm text-blue-600 flex items-center">
             <span>View all referrals</span>
             <ChevronRight className="h-4 w-4 ml-1" />
           </div>
         </Card>
-        
+
+        {/* Active Pipeline Card */}
+        <Card className="p-6 bg-white shadow-sm rounded-lg">
+          <div className="flex justify-between items-start">
+            <div>
+              <p className="text-sm font-medium text-gray-500">Active Pipeline</p>
+              <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.activePipeline}</h3>
+            </div>
+            <div className="p-2 bg-green-50 rounded-full">
+              <Briefcase className="h-5 w-5 text-green-500" />
+            </div>
+          </div>
+          <div className="mt-4 text-sm text-green-600 flex items-center">
+            <span>In progress</span>
+            <ChevronRight className="h-4 w-4 ml-1" />
+          </div>
+        </Card>
+
         {/* Total Offers */}
         <Card className="p-6 bg-white shadow-sm rounded-lg">
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Total Offers</p>
-              <h3 className="text-2xl font-bold text-gray-900 mt-1">{totalOffers}</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.totalOffers}</h3>
             </div>
             <div className="p-2 bg-amber-50 rounded-full">
               <Award className="h-5 w-5 text-amber-500" />
             </div>
           </div>
-          <div 
+          <div
             className="mt-4 text-sm text-amber-600 cursor-pointer flex items-center"
             onClick={() => {
               // Get offer candidate IDs
-              const offerCandidateIds = filteredData.summary.flatMap(month => 
+              const offerCandidateIds = processedData.summary.flatMap(month =>
                 month.stages
                   .filter(stage => offerStages.includes(stage.stage))
                   .flatMap(stage => stage.candidates)
@@ -383,13 +513,13 @@ export default function ReferralDashboard({
             <ChevronRight className="h-4 w-4 ml-1" />
           </div>
         </Card>
-        
+
         {/* Conversion Rate */}
         <Card className="p-6 bg-white shadow-sm rounded-lg">
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Conversion Rate</p>
-              <h3 className="text-2xl font-bold text-gray-900 mt-1">{conversionRate}</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.conversionRate}</h3>
             </div>
             <div className="p-2 bg-purple-50 rounded-full">
               <BarChart className="h-5 w-5 text-purple-500" />
@@ -399,42 +529,43 @@ export default function ReferralDashboard({
             <span>Referrals to offers</span>
           </div>
         </Card>
-        
+
         {/* Total Rejected */}
         <Card className="p-6 bg-white shadow-sm rounded-lg">
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Total Rejected</p>
-              <h3 className="text-2xl font-bold text-gray-900 mt-1">{totalRejections}</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.totalRejected}</h3>
             </div>
             <div className="p-2 bg-red-50 rounded-full">
               <X className="h-5 w-5 text-red-500" />
             </div>
           </div>
-          <div 
+          <div
             className="mt-4 text-sm text-red-600 cursor-pointer flex items-center"
             onClick={() => {
               // Get rejected candidate IDs
-              const rejectedCandidateIds = filteredData.summary.flatMap(month => {
-                const rejectStage = month.stages.find(stage => stage.stage === "Reject");
-                return rejectStage ? rejectStage.candidates : [];
-              });
-              onCandidateClick(rejectedCandidateIds, 'Rejected Referrals');
+              // const rejectedCandidateIds = processedData.summary.flatMap(month => {
+              //   const rejectStage = month.stages.find(stage => stage.stage === "Reject");
+              //   return rejectStage ? rejectStage.candidates : [];
+              // });
+              // onCandidateClick(rejectedCandidateIds, 'Rejected Referrals');
             }}
           >
             <span>View rejected</span>
             <ChevronRight className="h-4 w-4 ml-1" />
           </div>
         </Card>
+        
       </div>
-      
+
       {/* Recruitment Pipeline Card */}
       <Card className="p-6 bg-white shadow-sm rounded-lg">
         <h2 className="text-lg font-semibold text-gray-900 mb-4">Recruitment Pipeline</h2>
         <div className="h-[400px]">
-          {pipelineData.length > 0 ? (
+          {filteredData?.pipelineChartData?.length > 0 ? (
             <ResponsiveBar
-              data={pipelineData}
+              data={filteredData?.pipelineChartData}
               keys={['active', 'rejected']}
               indexBy="stage"
               margin={{ top: 50, right: 130, bottom: 80, left: 60 }}
@@ -506,10 +637,10 @@ export default function ReferralDashboard({
                 </div>
               )}
               onClick={(data) => {
-                const candidates = data.id === 'active' 
-                  ? data.data.activeCandidates 
+                const candidates = data.id === 'active'
+                  ? data.data.activeCandidates
                   : data.data.rejectedCandidates;
-                
+
                 const title = `${data.id === 'active' ? 'Active' : 'Rejected'} Referrals in ${data.indexValue} Stage`;
                 onCandidateClick(candidates, title);
               }}
@@ -521,17 +652,17 @@ export default function ReferralDashboard({
           )}
         </div>
       </Card>
-      
+
       {/* Top Referrers and Monthly Trend in the same row */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         {/* Top Referrers */}
         <Card className="p-6 bg-white shadow-sm rounded-lg">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Top Referrers</h2>
           <div className="space-y-3">
-            {filteredData.topReferrers.length > 0 ? (
-              filteredData.topReferrers.slice(0, 5).map((referrer, index) => (
-                <div 
-                  key={index} 
+            {Object.values(filteredData?.topReferrers || {}).length > 0 ? (
+              Object.values(filteredData?.topReferrers || {}).map((referrer, index) => (
+                <div
+                  key={index}
                   className="flex items-center justify-between p-3 bg-gray-50 rounded cursor-pointer hover:bg-gray-100"
                   onClick={() => onCandidateClick(referrer.candidates, `Referrals by ${referrer.name}`)}
                 >
@@ -553,14 +684,14 @@ export default function ReferralDashboard({
             )}
           </div>
         </Card>
-        
+
         {/* Monthly Trend */}
         <Card className="p-6 bg-white shadow-sm rounded-lg">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Monthly Referral Trend</h2>
           <div className="h-[300px]">
-            {monthlyTrendData.length > 0 ? (
+            {filteredData?.monthlyTrendData?.length > 0 ? (
               <ResponsiveBar
-                data={monthlyTrendData}
+                data={filteredData?.monthlyTrendData}
                 keys={['referrals']}
                 indexBy="month"
                 margin={{ top: 50, right: 130, bottom: 50, left: 60 }}

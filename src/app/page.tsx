@@ -463,6 +463,7 @@ export default function Dashboard() {
       } else if (result.data) {
         setDashboardData(result.data);
         calculateFilteredData(result.data);
+        console.log(Object.keys(result.data.refferals));
       } else {
         setError('No data returned from API');
       }
@@ -477,6 +478,7 @@ export default function Dashboard() {
   useEffect(() => {
     if (dashboardData) {
       calculateFilteredData(dashboardData);
+      console.log(dashboardData)
     }
 
   }, [selectedJobs, selectedMonth])
@@ -491,7 +493,8 @@ export default function Dashboard() {
       pipelineStages: {},
       channelAttr: {},
       pipelineChartData: [],
-      channelChartData: []
+      channelChartData: [],
+      channelData: [],
     }
 
     // Initialize channelChartData array
@@ -552,6 +555,13 @@ export default function Dashboard() {
         }
         values.pipelineStages[currentStage].active++;
       }
+
+      values.channelData.push({
+        name: data.Source.SourceDrillDown1,
+        value: data.Source.SourceDrillDown2,
+        active: data.ResumeStage.Value,
+        rejected: data.ResumeStage.previousStatus
+      })
     }
     })
 
@@ -1084,19 +1094,17 @@ export default function Dashboard() {
                 </div>
               </Card>
             </TabsContent>
-
             <TabsContent value="referrals" className="mt-0">
               {dashboardData && (
                 <ReferralDashboard
-                  referralData={dashboardData.referralData}
-                  candidateData={dashboardData.candidateData}
+                  referralData={dashboardData.refferals}
                   selectedMonth={selectedMonth}
                   selectedJobs={selectedJobs}
                   onCandidateClick={(candidateIds) => {
                     handleCandidateClick(candidateIds, 'Referral Candidates');
                   }}
                 />
-              )}
+              )}  
             </TabsContent>
           </>
         )}
