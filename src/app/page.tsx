@@ -402,7 +402,7 @@ const jobs = [
 const pipelineStageOrder = {
   "Pool": 1,
   "HR Screening": 2,
-  "Xobin Test": 3,
+  "Xray/Manager Screening": 3,
   "L1 Interview": 4,
   "L2 Interview": 5,
   "Final Round": 6,
@@ -411,8 +411,7 @@ const pipelineStageOrder = {
   "Offer Approval": 9,
   "Offer": 10,
   "Nurturing Campaign": 11,
-  "Hired": 12,
-  // "Reject": 13
+  "Hired": 12
 };
 
 export default function Dashboard() {
@@ -495,7 +494,8 @@ export default function Dashboard() {
       channelChartData: [],
       channelMetrics: [],
       monthlyTrends: [] as any[],
-      topReferrers: [] as any[]
+      topReferrers: [] as any[],
+      stageConversionRates: []
     }
 
     // Initialize channelChartData array
@@ -670,7 +670,90 @@ export default function Dashboard() {
         return months.indexOf(a.month) - months.indexOf(b.month);
       });
 
-      
+    // Calculate stage-wise conversion rates
+    const stageCounts = new Map();
+    const stageRejections = new Map();
+    const stageActive = new Map();
+    const stageTotals = new Map();
+    
+    // First pass: Count candidates in each stage
+    Object.entries(_dashboardData.candidateData || {}).forEach(([resumeId, candidate]: [string, CandidateData]) => {
+      const [itemMonth, itemJobId] = resumeId.split('_');
+      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+
+      if (monthMatches && jobMatches) {
+        const currentStage = stageMapping[candidate.ResumeStage.Value];
+        const previousStage = stageMapping[candidate.ResumeStage.previousStatus];
+
+        // Count current stage
+        if (currentStage && candidate.ResumeStage.Value !== 1) { // Not rejected
+          stageActive.set(currentStage, (stageActive.get(currentStage) || 0) + 1);
+          stageTotals.set(currentStage, (stageTotals.get(currentStage) || 0) + 1);
+        }
+
+        // Count rejections in previous stage
+        if (previousStage && candidate.ResumeStage.Value === 1) {
+          stageRejections.set(previousStage, (stageRejections.get(previousStage) || 0) + 1);
+        }
+      }
+    });
+
+    // Calculate selected counts (candidates in future stages)
+    const stageSelected = new Map();
+    stageOrderMapping.forEach((stage, index) => {
+      let selectedCount = 0;
+      // Sum up candidates in all future stages
+      for (let i = index + 1; i < stageOrderMapping.length; i++) {
+        const futureStage = stageOrderMapping[i];
+        selectedCount += stageTotals.get(futureStage) || 0;
+      }
+      stageSelected.set(stage, selectedCount);
+    });
+
+    // Convert to rates
+    values.stageConversionRates = stageOrderMapping
+      .map((stage, index) => {
+        const rejected = stageRejections.get(stage) || 0;
+        const active = stageActive.get(stage) || 0;
+        const selected = stageSelected.get(stage) || 0;
+
+        let denominator;
+        if (index === 0) { // First stage (Pool)
+          denominator = values.totalApplicants;
+        } else {
+          const prevStage = stageOrderMapping[index - 1];
+          const prevSelected = stageSelected.get(prevStage) || 0;
+          denominator = prevSelected || 1; // Avoid division by zero
+        }
+
+        // Skip if no meaningful data
+        if (denominator === 0 || (rejected === 0 && active === 0 && selected === 0)) {
+          return null;
+        }
+
+        // Calculate raw percentages
+        let rejectionRate = Number(((rejected / denominator) * 100).toFixed(1));
+        let activeRate = Number(((active / denominator) * 100).toFixed(1));
+        let selectionRate = Number(((selected / denominator) * 100).toFixed(1));
+
+        // Normalize percentages to ensure they sum to 100%
+        const total = rejectionRate + activeRate + selectionRate;
+        if (total > 0 && total !== 100) {
+          const factor = 100 / total;
+          rejectionRate = Number((rejectionRate * factor).toFixed(1));
+          activeRate = Number((activeRate * factor).toFixed(1));
+          selectionRate = Number((100 - rejectionRate - activeRate).toFixed(1));
+        }
+
+        return {
+          stage,
+          rejectionRate: Math.max(0, rejectionRate),
+          activeRate: Math.max(0, activeRate),
+          selectionRate: Math.max(0, selectionRate)
+        };
+      })
+      .filter(item => item !== null);
 
     setFilteredData(values);
   }
@@ -1074,17 +1157,18 @@ export default function Dashboard() {
                 <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Stage-wise Conversion Rates</h3>
                   <div className="h-80">
-                    {[].length > 0 ? (
+                    {filteredData.stageConversionRates?.length > 0 ? (
                       <ResponsiveBar
-                        data={[]}
-                        keys={['selectionRate', 'rejectionRate']}
+                        data={filteredData.stageConversionRates}
+                        keys={['selectionRate', 'rejectionRate', 'activeRate']}
                         indexBy="stage"
                         margin={{ top: 10, right: 10, bottom: 100, left: 60 }}
                         padding={0.3}
-                        groupMode="grouped"
-                        valueScale={{ type: 'linear' }}
+                        maxValue={100}
+                        groupMode="stacked"
+                        valueScale={{ type: 'linear', min: 0, max: 100 }}
                         indexScale={{ type: 'band', round: true }}
-                        colors={['#10b981', '#ef4444']}
+                        colors={['#10b981', '#ef4444', '#3b82f6']} // green for selected, red for rejected, blue for active
                         theme={chartTheme}
                         axisBottom={{
                           tickSize: 5,
@@ -1103,7 +1187,8 @@ export default function Dashboard() {
                           legendOffset: -50,
                           format: v => `${v}%`
                         }}
-                        labelFormat={v => `${v}%`}
+                        enableLabel={true}
+                        label={d => `${d.value}%`}
                         labelSkipWidth={12}
                         labelSkipHeight={12}
                         legends={[
@@ -1123,13 +1208,18 @@ export default function Dashboard() {
                             data: [
                               {
                                 id: 'selectionRate',
-                                label: 'Selection Rate',
+                                label: 'Selected',
                                 color: '#10b981'
                               },
                               {
                                 id: 'rejectionRate',
-                                label: 'Rejection Rate',
+                                label: 'Rejected',
                                 color: '#ef4444'
+                              },
+                              {
+                                id: 'activeRate',
+                                label: 'Active',
+                                color: '#3b82f6'
                               }
                             ],
                             effects: [
@@ -1142,6 +1232,18 @@ export default function Dashboard() {
                             ]
                           }
                         ]}
+                        tooltip={({ id, value, indexValue }) => (
+                          <div className="bg-white p-2 shadow-lg rounded-lg border">
+                            <strong>{indexValue}</strong>
+                            <div style={{ 
+                              color: id === 'selectionRate' ? '#10b981' : 
+                                     id === 'rejectionRate' ? '#ef4444' : '#3b82f6' 
+                            }}>
+                              {id === 'selectionRate' ? 'Selected: ' : 
+                               id === 'rejectionRate' ? 'Rejected: ' : 'Active: '}{value}%
+                            </div>
+                          </div>
+                        )}
                       />
                     ) : (
                       <div className="flex items-center justify-center h-full">

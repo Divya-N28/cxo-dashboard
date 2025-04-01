@@ -843,7 +843,7 @@ export async function generateMonthlyData(jobs: Job[], token: string): Promise<{
             const status = error.response?.status || 500;
             const message = error.message || 'Unknown error occurred';
             
-            if (status === 401 && typeof window !== 'undefined') {
+            if (status === 401) {
                 sessionStorage.removeItem('apiToken');
             }
             
