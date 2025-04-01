@@ -2,7 +2,7 @@ import React, { useMemo, useEffect, useState } from 'react';
 import { Card } from '@/components/ui/card';
 import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveBar } from '@nivo/bar';
-import { stageMapping } from '@/utils/dataFetcher';
+import { stageMapping, stageOrderMapping } from '@/utils/dataFetcher';
 import { Users, Award, BarChart, ChevronRight, Briefcase, X } from 'lucide-react';
 
 // Helper functions
@@ -81,6 +81,7 @@ interface CandidateDataType {
   };
   ResumeId: string;
   UploadDateTime: string;
+  DateTime: string;
 }
 
 interface ReferralDashboardProps {
@@ -372,20 +373,22 @@ export default function ReferralDashboard({
       const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
 
       if ((monthMatches && jobMatches)) {
+        // Update total applicants
         values.totalApplicants += 1;
-
-        if (data.ResumeStage.Value === 1) {
-          values.totalRejected++;
-        } else if (stageMapping[data.ResumeStage.Value] === 'Offer' || stageMapping[data.ResumeStage.Value] === 'Nurturing Campaign' || stageMapping[data.ResumeStage.Value] === 'Hired') {
-          values.totalOffers++;
-
-        } else {
-          values.activePipeline++;
-        }
 
         const currentStage = stageMapping[data.ResumeStage.Value];
         const previousStage = stageMapping[data.ResumeStage.previousStatus];
 
+        // Update metrics based on stage
+        if (data.ResumeStage.Value === 1) {
+          values.totalRejected++;
+        } else if (['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(currentStage)) {
+          values.totalOffers++;
+        } else {
+          values.activePipeline++;
+        }
+
+        // Update pipeline stages
         if (data.ResumeStage.Value === 1) {
           if (!values.pipelineStages[previousStage]) {
             values.pipelineStages[previousStage] = {
@@ -406,6 +409,7 @@ export default function ReferralDashboard({
           values.pipelineStages[currentStage].active++;
         }
 
+        // Update top referrers
         if (!values.topReferrers[data.Source.SourceDrillDown2]) {
           values.topReferrers[data.Source.SourceDrillDown2] = {
             name: data.Source.SourceDrillDown2,
@@ -414,8 +418,9 @@ export default function ReferralDashboard({
           }
         }
         values.topReferrers[data.Source.SourceDrillDown2].count++;
-        values.topReferrers[data.Source.SourceDrillDown2].candidates.push(data.resumeId);
+        values.topReferrers[data.Source.SourceDrillDown2].candidates.push(data.ResumeId);
 
+        // Update monthly trend data
         if (!values.monthlyTrendData[itemMonth]) {
           values.monthlyTrendData[itemMonth] = {
             month: itemMonth,
@@ -423,30 +428,53 @@ export default function ReferralDashboard({
             conversionRate: 0
           }
         }
-        values.monthlyTrendData[itemMonth].referrals++; 
+        values.monthlyTrendData[itemMonth].referrals++;
       }
-    })
+    });
 
-    Object.keys(values.pipelineStages).map((item) => {
+    // Calculate conversion rate
+    values.conversionRate = values.totalApplicants > 0 
+      ? Math.round((values.totalOffers / values.totalApplicants) * 100)
+      : 0;
+
+    // Process pipeline stages into chart data
+    stageOrderMapping.map((item) => {
       const data = values.pipelineStages[item];
-      values.pipelineChartData.push(data);
-    })
+      if(data) {
+        values.pipelineChartData.push(data);
+      }
+    });
 
+    // Sort and limit top referrers
     values.topReferrers = Object.values(values.topReferrers)
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 5)
-    .reduce((acc, referrer) => {
-      acc[referrer.name] = referrer;
-      return acc;
-    }, {});
-    
-    values.monthlyTrendData = Object.values(values.monthlyTrendData)
-    .sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime());
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 5)
+      .reduce((acc, referrer) => {
+        acc[referrer.name] = referrer;
+        return acc;
+      }, {});
 
-    console.log(values.monthlyTrendData);
+    // Sort monthly trend data chronologically
+    values.monthlyTrendData = Object.values(values.monthlyTrendData)
+      .sort((a, b) => new Date(a.month).getTime() - new Date(b.month).getTime());
+
+    // Calculate conversion rates for each month
+    values.monthlyTrendData.forEach(month => {
+      const monthData = Object.entries(referralData)
+        .filter(([key]) => key.startsWith(month.month));
+      
+      const monthOffers = monthData.filter(([_, data]) => {
+        const stage = stageMapping[data.ResumeStage.Value];
+        return ['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stage);
+      }).length;
+
+      month.conversionRate = monthData.length > 0 
+        ? Math.round((monthOffers / monthData.length) * 100)
+        : 0;
+    });
 
     setFilteredData(values);
-  }
+  };
 
   return (
     <div className="space-y-6">
@@ -463,7 +491,18 @@ export default function ReferralDashboard({
               <Users className="h-5 w-5 text-blue-500" />
             </div>
           </div>
-          <div className="mt-4 text-sm text-blue-600 flex items-center">
+          <div className="mt-4 text-sm text-blue-600 flex items-center" onClick={() => {
+              const totalCandidates = Object.entries(referralData)
+                .filter(([key, data]) => {
+                  const [itemMonth, itemJobId] = key.split('_');
+                  const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                  const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                  return monthMatches && jobMatches;
+                })
+                .map(([_, data]) => data.ResumeId);
+
+              onCandidateClick(totalCandidates, 'Total Referrals');
+            }}>
             <span>View all referrals</span>
             <ChevronRight className="h-4 w-4 ml-1" />
           </div>
@@ -480,8 +519,20 @@ export default function ReferralDashboard({
               <Briefcase className="h-5 w-5 text-green-500" />
             </div>
           </div>
-          <div className="mt-4 text-sm text-green-600 flex items-center">
-            <span>In progress</span>
+          <div className="mt-4 text-sm text-green-600 flex items-center" onClick={() => {
+              const totalCandidates = Object.entries(referralData)
+                .filter(([key, data]) => {
+                  const [itemMonth, itemJobId] = key.split('_');
+                  const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                  const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                  return monthMatches && jobMatches && data.ResumeStage.Value !== 1 && !['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stageMapping[data.ResumeStage.Value]);
+                })
+                .map(([_, data]) => data.ResumeId);
+
+              console.log(totalCandidates);
+              onCandidateClick(totalCandidates, 'Active Pipeline');
+            }}>
+            <span>Active Pipeline</span>
             <ChevronRight className="h-4 w-4 ml-1" />
           </div>
         </Card>
@@ -500,13 +551,16 @@ export default function ReferralDashboard({
           <div
             className="mt-4 text-sm text-amber-600 cursor-pointer flex items-center"
             onClick={() => {
-              // Get offer candidate IDs
-              const offerCandidateIds = processedData.summary.flatMap(month =>
-                month.stages
-                  .filter(stage => offerStages.includes(stage.stage))
-                  .flatMap(stage => stage.candidates)
-              );
-              onCandidateClick(offerCandidateIds, 'Referrals with Offers');
+              const offerCandidates = Object.entries(referralData)
+                .filter(([key, data]) => {
+                  const [itemMonth, itemJobId] = key.split('_');
+                  const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                  const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                  const stage = stageMapping[data.ResumeStage.Value];
+                  return monthMatches && jobMatches && ['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stage);
+                })
+                .map(([_, data]) => data.ResumeId);
+              onCandidateClick(offerCandidates, 'Referrals with Offers');
             }}
           >
             <span>View offers</span>
@@ -519,7 +573,7 @@ export default function ReferralDashboard({
           <div className="flex justify-between items-start">
             <div>
               <p className="text-sm font-medium text-gray-500">Conversion Rate</p>
-              <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.conversionRate}</h3>
+              <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.conversionRate}%</h3>
             </div>
             <div className="p-2 bg-purple-50 rounded-full">
               <BarChart className="h-5 w-5 text-purple-500" />
@@ -544,12 +598,15 @@ export default function ReferralDashboard({
           <div
             className="mt-4 text-sm text-red-600 cursor-pointer flex items-center"
             onClick={() => {
-              // Get rejected candidate IDs
-              // const rejectedCandidateIds = processedData.summary.flatMap(month => {
-              //   const rejectStage = month.stages.find(stage => stage.stage === "Reject");
-              //   return rejectStage ? rejectStage.candidates : [];
-              // });
-              // onCandidateClick(rejectedCandidateIds, 'Rejected Referrals');
+              const rejectedCandidates = Object.entries(referralData)
+                .filter(([key, data]) => {
+                  const [itemMonth, itemJobId] = key.split('_');
+                  const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                  const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                  return monthMatches && jobMatches && data.ResumeStage.Value === 1;
+                })
+                .map(([_, data]) => data.ResumeId);
+              onCandidateClick(rejectedCandidates, 'Rejected Referrals');
             }}
           >
             <span>View rejected</span>
@@ -637,11 +694,27 @@ export default function ReferralDashboard({
                 </div>
               )}
               onClick={(data) => {
-                const candidates = data.id === 'active'
-                  ? data.data.activeCandidates
-                  : data.data.rejectedCandidates;
+                const stage = data.indexValue;
+                const isActive = data.id === 'active';
+                
+                const candidates = Object.entries(referralData)
+                  .filter(([key, candidateData]) => {
+                    const [itemMonth, itemJobId] = key.split('_');
+                    const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                    const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                    
+                    if (!monthMatches || !jobMatches) return false;
 
-                const title = `${data.id === 'active' ? 'Active' : 'Rejected'} Referrals in ${data.indexValue} Stage`;
+                    if (isActive) {
+                      return stageMapping[candidateData.ResumeStage.Value] === stage;
+                    } else {
+                      return candidateData.ResumeStage.Value === 1 && 
+                             stageMapping[candidateData.ResumeStage.previousStatus] === stage;
+                    }
+                  })
+                  .map(([_, data]) => data.ResumeId);
+
+                const title = `${isActive ? 'Active' : 'Rejected'} Referrals in ${stage} Stage`;
                 onCandidateClick(candidates, title);
               }}
             />

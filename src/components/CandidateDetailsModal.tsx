@@ -50,6 +50,7 @@ interface CandidateDetailsModalProps {
     };
     ResumeUrl: string;
     UploadDateTime: string;
+    DateTime: string;
   }[];
   title?: string;
 }
@@ -108,8 +109,8 @@ export default function CandidateDetailsModal({
                   )}
                 </TableCell>
                 <TableCell>
-                  {candidate.WorkData.TotalExperience} months
-                  {candidate.WorkData.WorkDataList.length > 0 && (
+                  {candidate.WorkData?.TotalExperience} months
+                  {candidate.WorkData?.WorkDataList?.length > 0 && (
                     <div className="text-xs text-gray-500">
                       Last: {candidate.WorkData.WorkDataList[0].CompanyName}
                     </div>

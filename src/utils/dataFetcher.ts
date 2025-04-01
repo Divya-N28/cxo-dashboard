@@ -72,9 +72,29 @@ interface StageConversionRates {
     [key: string]: StageConversionRate;
 }
 
+export const stageOrderMapping = [
+  "Pool",
+  "HR Screening",
+  "Hiring Manager Screening",
+  "Panel Screening",
+  "Xobin Test",
+  "L1 Interview", 
+  "L2 Interview",
+  "Final Round",
+  "HR Round",
+  "Pre Offer Documentation",
+  "Offer Approval",
+  "Offer",
+  "Nurturing Campaign",
+  "Nuturing Campaign",
+  "Hired"
+]
+
 export const stageMapping: StageMapping = {
     "0": "Pool",
     "14": "HR Screening",
+    "28": "Hiring Manager Screening",
+    "23": "Panel Screening",
     "15": "Xobin Test",
     "9": "L1 Interview",
     "10": "L2 Interview",
@@ -86,8 +106,7 @@ export const stageMapping: StageMapping = {
     "19": "Nurturing Campaign",
     "6": "Hired",
     "1": "Reject",
-    "28": "Hiring Manager Screening",
-    "23": "Panel Screening"
+    "27": "Nuturing Campaign"
 };
 
   const l2SelectStages = [
@@ -1305,7 +1324,8 @@ async function generateDashboardData(token: string) {
     // Step 4: Fetch resume data in batches
     const batchSize = 300;
     const allResumes = [];
-    
+    let allStatusChanges = {};
+
     for (let i = 0; i < resumeIds.length; i += batchSize) {
       const batchIds = resumeIds.slice(i, Math.min(i + batchSize, resumeIds.length));
       
@@ -1317,6 +1337,23 @@ async function generateDashboardData(token: string) {
         
         if (resumeDataResponse.data) {
           allResumes.push(...resumeDataResponse.data);
+        }
+      } catch (error) {
+        console.error(`Error fetching batch ${Math.floor(i/batchSize) + 1}:`, error);
+      }
+    }
+
+    for (let i = 0; i < resumeIds.length; i += batchSize) {
+      const batchIds = resumeIds.slice(i, Math.min(i + batchSize, resumeIds.length));
+      
+      try {
+        const resumeDataResponse = await apiClient.post(
+          'https://api.turbohire.co/api/resumes/statuschangedata',
+          batchIds
+        );
+        
+        if (resumeDataResponse.data) {
+          allStatusChanges = {...allStatusChanges, ...resumeDataResponse.data};
         }
       } catch (error) {
         console.error(`Error fetching batch ${Math.floor(i/batchSize) + 1}:`, error);
@@ -1665,20 +1702,22 @@ async function generateDashboardData(token: string) {
     const candidatesByChannel = {};   
     const refferals = {}; 
     const offers = {};
+    const allResumesData = {};
+    const allStatusChangesData = {};
     // Process each resume
-    allResumes.forEach(resume => {
-      // Store job info
-      if(resume.Status == 23) {
-        console.log("resume", resume)
-      }
 
+  
+
+    allResumes.forEach(resume => {
+      allResumesData[resume.ResumeId] = resume;
+  
       if (resume.Parent && resume.Parent.ParentId) {
         jobData[resume.Parent.ParentId] = {
           name: resume.Parent.Name,
           code: resume.Parent.JobCode || ''
         };
       }
-      const uploadDate = new Date(resume.UploadDateTime);
+      const uploadDate = new Date(allStatusChanges[resume.ResumeId]?.MovedDate || resume.UploadDateTime);
       const month = uploadDate.toLocaleString('en-US', { month: 'short' });
 
       if(!allDatas[`${month}_${resume.Parent.ParentId}`]) {
@@ -1698,7 +1737,7 @@ async function generateDashboardData(token: string) {
 
       if (resume.Status === 1) {
         allMap.totalRejected++;
-      } else if (status === 'Offer' || status === 'Nurturing Campaign' || status === 'Hired') {
+      } else if (status === 'Offer' || status === 'Nurturing Campaign' || status === 'Hired' || status === 'Nuturing Campaign') {
         allMap.totalOffers++;
         allMap.offer++;
         if(!offers[month]){
@@ -1745,7 +1784,8 @@ async function generateDashboardData(token: string) {
         },
         ResumeId: resume.ResumeId,
         ResumeUrl: resume.ResumeUrl || '',
-        UploadDateTime: resume.UploadDateTime || ''
+        UploadDateTime: resume.UploadDateTime || '',
+        DateTime: allStatusChanges[resume.ResumeId]?.MovedDate || ''
       };
 
       // Store candidate data
@@ -1759,16 +1799,15 @@ async function generateDashboardData(token: string) {
      {
      }
 
-    console.log("offers", offers)
     return { 
       data: {
         candidateData,
         jobData,
         refferals,
-        allDatas
+        allDatas,
+        allResumesData
       }
     };
-    console.log(allDatas)
   } catch (error) {
     console.error('Error generating dashboard data:', error);
     

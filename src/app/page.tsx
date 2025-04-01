@@ -4,7 +4,7 @@ import { Card } from "@/components/ui/card";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsivePie } from "@nivo/pie";
 import { useState, useMemo, useEffect, useCallback } from "react";
-import { generateDashboardData, testApiToken, stageMapping, channelCategories } from '@/utils/dataFetcher';
+import { generateDashboardData, testApiToken, stageMapping, channelCategories, stageOrderMapping } from '@/utils/dataFetcher';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
@@ -110,6 +110,7 @@ interface CandidateData {
   };
   ResumeUrl: string;
   UploadDateTime: string;
+  DateTime: string;
 }
 
 interface DashboardData {
@@ -463,7 +464,6 @@ export default function Dashboard() {
       } else if (result.data) {
         setDashboardData(result.data);
         calculateFilteredData(result.data);
-        console.log(Object.keys(result.data.refferals));
       } else {
         setError('No data returned from API');
       }
@@ -478,7 +478,6 @@ export default function Dashboard() {
   useEffect(() => {
     if (dashboardData) {
       calculateFilteredData(dashboardData);
-      console.log(dashboardData)
     }
 
   }, [selectedJobs, selectedMonth])
@@ -489,13 +488,14 @@ export default function Dashboard() {
       activePipeline: 0,
       totalOffers: 0,
       totalRejected: 0,
-      conversionRate: 0,
+      conversionRate: "0%",
       pipelineStages: {},
       channelAttr: {},
       pipelineChartData: [],
       channelChartData: [],
       channelMetrics: [],
       monthlyTrends: [] as any[],
+      topReferrers: [] as any[]
     }
 
     // Initialize channelChartData array
@@ -533,10 +533,9 @@ export default function Dashboard() {
       const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
 
       if ((monthMatches && jobMatches)) {
-
       const currentStage = stageMapping[data.ResumeStage.Value];
       const previousStage = stageMapping[data.ResumeStage.previousStatus];
-
+        
       if (data.ResumeStage.Value === 1) {
         if (!values.pipelineStages[previousStage]) {
           values.pipelineStages[previousStage] = {
@@ -560,11 +559,12 @@ export default function Dashboard() {
     }
     })
 
-    Object.keys(values.pipelineStages).map((item) => {
+    stageOrderMapping.map((item) => {
       const data = values.pipelineStages[item];
-      values.pipelineChartData.push(data);
+      if(data) {
+        values.pipelineChartData.push(data);
+      }
     })
-
 
     // Convert aggregated data to pie chart format
     channelCounts.forEach((count, channelName) => {
@@ -607,13 +607,17 @@ export default function Dashboard() {
 
         if (data.ResumeStage.Value === 1) {
           metrics.rejected++;
-        } else if (['Offer', 'Nurturing Campaign', 'Hired'].includes(stageName)) {
+        } else if (['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stageName)) {
           metrics.offers++;
         } else {
           metrics.active++;
         }
       }
     });
+
+    values.conversionRate = values.totalApplicants > 0
+    ? `${((values.totalOffers / values.totalApplicants) * 100).toFixed(1)}%`
+    : '0%';
 
     // Calculate rates and format the final channel metrics
     values.channelMetrics = Array.from(channelMetrics.values()).map(metrics => ({
@@ -625,6 +629,7 @@ export default function Dashboard() {
         ? `${((metrics.rejected / metrics.total) * 100).toFixed(1)}%`
         : '0%'
     })).sort((a, b) => b.total - a.total); // Sort by total count descending
+    
 
     // Create a map to store monthly aggregated data
     const monthlyData = new Map();
@@ -650,7 +655,7 @@ export default function Dashboard() {
 
         if (data.ResumeStage.Value === 1) {
           monthStats.rejected++;
-        } else if (['Offer', 'Nurturing Campaign', 'Hired'].includes(stageName)) {
+        } else if (['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stageName)) {
           monthStats.offers++;
         } else {
           monthStats.activePipeline++;
@@ -664,6 +669,8 @@ export default function Dashboard() {
         const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
         return months.indexOf(a.month) - months.indexOf(b.month);
       });
+
+      
 
     setFilteredData(values);
   }
@@ -682,7 +689,7 @@ export default function Dashboard() {
     if (!dashboardData || !resumeIds.length) return;
 
     const candidates = resumeIds
-      .map(id => dashboardData.candidateData[id])
+      .map(id => dashboardData.allResumesData[id])
       .filter(Boolean);
 
     setSelectedCandidates(candidates);
@@ -766,7 +773,7 @@ export default function Dashboard() {
                       .filter(c => {
                         const stageName = stageMapping[c.ResumeStage.Value.toString()];
                         return c.ResumeStage.Value !== 1 && // Not rejected
-                          !["Offer", "Nurturing Campaign", "Hired"].includes(stageName); // Not in offer stages
+                          !["Offer", "Nurturing Campaign", "Hired", "Nuturing Campaign"].includes(stageName); // Not in offer stages
                       });
 
                     handleCandidateClick(
@@ -789,7 +796,7 @@ export default function Dashboard() {
                     const offerCandidates = Object.values(filteredData.candidateData || {})
                       .filter(c => {
                         const stageName = stageMapping[c.ResumeStage.Value.toString()];
-                        return ["Offer", "Nurturing Campaign", "Hired"].includes(stageName);
+                        return ["Offer", "Nurturing Campaign", "Hired", "Nuturing Campaign"].includes(stageName);
                       });
 
                     handleCandidateClick(
@@ -828,7 +835,7 @@ export default function Dashboard() {
                   <div className="flex justify-between items-start">
                     <div>
                       <p className="text-sm font-medium text-gray-500">Conversion Rate</p>
-                      <h3 className="text-2xl font-bold text-gray-900 mt-1">{0}</h3>
+                      <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.conversionRate || "0%"}</h3>
                     </div>
                     <div className="p-2 bg-purple-50 rounded-full">
                       <BarChart className="h-5 w-5 text-purple-500" />
@@ -1064,7 +1071,7 @@ export default function Dashboard() {
                 </Card>
 
                 {/* Stage-wise Conversion Rates */}
-                <Card className="p-4 bg-white shadow-sm rounded-lg mt-6">
+                <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Stage-wise Conversion Rates</h3>
                   <div className="h-80">
                     {[].length > 0 ? (
@@ -1216,6 +1223,99 @@ export default function Dashboard() {
                   }}
                 />
               )}  
+            </TabsContent>
+            <TabsContent value="leaderboard" className="mt-0">
+              <div className="grid gap-6">
+                {/* Top Referrers Card */}
+                <Card className="p-6">
+                  <h3 className="text-xl font-semibold mb-4">Top Referrers</h3>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    {filteredData?.topReferrers?.slice(0, 3).map((referrer, index) => (
+                      <Card key={referrer.name} className="p-4 relative overflow-hidden">
+                        {/* Position Badge */}
+                        <div className={`absolute top-0 right-0 w-12 h-12 flex items-center justify-center ${
+                          index === 0 ? 'bg-yellow-400' : 
+                          index === 1 ? 'bg-gray-300' : 
+                          'bg-amber-600'
+                        } rounded-bl-lg`}>
+                          {index === 0 ? '🏆' : index === 1 ? '🥈' : '🥉'}
+                        </div>
+                        
+                        <div className="flex items-center space-x-3">
+                          <div className="flex-shrink-0">
+                            <div className="w-12 h-12 rounded-full bg-blue-100 flex items-center justify-center">
+                              <span className="text-xl">{referrer.name.charAt(0)}</span>
+                            </div>
+                          </div>
+                          <div>
+                            <h4 className="font-semibold">{referrer.name}</h4>
+                            <p className="text-sm text-gray-500">
+                              {referrer.count} referrals ({referrer.percentage})
+                            </p>
+                          </div>
+                        </div>
+                      </Card>
+                    ))}
+                  </div>
+                </Card>
+
+                {/* All Referrers Table */}
+                <Card className="p-6">
+                  <h3 className="text-xl font-semibold mb-4">All Referrers</h3>
+                  <div className="overflow-x-auto">
+                    <table className="w-full">
+                      <thead>
+                        <tr className="border-b">
+                          <th className="text-left py-3 px-4">Rank</th>
+                          <th className="text-left py-3 px-4">Name</th>
+                          <th className="text-right py-3 px-4">Referrals</th>
+                          <th className="text-right py-3 px-4">Success Rate</th>
+                          <th className="text-right py-3 px-4">Status</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {filteredData?.topReferrers?.map((referrer, index) => (
+                          <tr 
+                            key={referrer.name}
+                            className={index % 2 === 0 ? 'bg-gray-50' : 'bg-white'}
+                            onClick={() => handleCandidateClick(referrer.candidates, `Referrals by ${referrer.name}`)}
+                            style={{ cursor: 'pointer' }}
+                          >
+                            <td className="py-3 px-4">
+                              <div className="flex items-center">
+                                {index < 3 && (
+                                  <span className="mr-2">
+                                    {index === 0 ? '🏆' : index === 1 ? '🥈' : '🥉'}
+                                  </span>
+                                )}
+                                #{index + 1}
+                              </div>
+                            </td>
+                            <td className="py-3 px-4">{referrer.name}</td>
+                            <td className="text-right py-3 px-4">{referrer.count}</td>
+                            <td className="text-right py-3 px-4">{referrer.percentage}</td>
+                            <td className="text-right py-3 px-4">
+                              {index < 3 ? (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                                  Top Performer
+                                </span>
+                              ) : index < 10 ? (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                  Active Referrer
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800">
+                                  Regular
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </Card>
+              </div>
             </TabsContent>
           </>
         )}
