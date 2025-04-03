@@ -11,12 +11,18 @@ import { cn } from '@/lib/utils';
 import { FiCalendar } from 'react-icons/fi';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import React from 'react';
-import { EStage } from "@/types/dashboard";
-import { Check, ChevronDown, Settings, BarChart } from 'lucide-react';
+import { EStage, PipelineStageMapping } from "@/types/dashboard";
+import { Check, ChevronDown, Settings, BarChart, Info } from 'lucide-react';
 import ReferralDashboard from '@/components/ReferralDashboard';
 import CandidateDetailsModal from '@/components/CandidateDetailsModal';
 import ApiTokenSettings from '@/components/ApiTokenSettings';
 import JobFilter from '@/components/JobFilter';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 
 // Define types for better type safety
 interface ChannelData {
@@ -457,7 +463,7 @@ export default function Dashboard() {
       }
 
       // If token is valid, fetch dashboard data
-      const result = await generateDashboardData(token);
+      const result = await generateDashboardData(tokenTest.token);
       if (result.error) {
         setError(`Error: ${result.error.message}`);
       } else if (result.data) {
@@ -487,6 +493,9 @@ export default function Dashboard() {
       activePipeline: 0,
       totalOffers: 0,
       totalRejected: 0,
+      totalHired: 0,
+      yetToJoin: 0,
+      declined: 0, 
       conversionRate: "0%",
       pipelineStages: {},
       channelAttr: {},
@@ -517,6 +526,9 @@ export default function Dashboard() {
         values.activePipeline += data.activePipeline;
         values.totalOffers += data.totalOffers;
         values.totalRejected += data.totalRejected;
+        values.totalHired += data.totalHired;
+        values.yetToJoin += data.yetToJoin;
+        values.declined += data.declined;
 
         Object.entries(data.channel).forEach(([channelName, count]) => {
           const currentCount = channelCounts.get(channelName) || 0;
@@ -539,7 +551,7 @@ export default function Dashboard() {
       if (data.ResumeStage.Value === 1) {
         if (!values.pipelineStages[previousStage]) {
           values.pipelineStages[previousStage] = {
-            stage: previousStage,
+            stage: PipelineStageMapping[previousStage],
             active: 0,
             rejected: 0
           }
@@ -548,12 +560,12 @@ export default function Dashboard() {
       } else {
         if (!values.pipelineStages[currentStage]) {
           values.pipelineStages[currentStage] = {
-            stage: currentStage,
+            stage: PipelineStageMapping[currentStage],
             active: 0,
             rejected: 0
           }
         }
-        values.pipelineStages[currentStage].active++;
+        // values.pipelineStages[currentStage].active++;
       }
 
     }
@@ -749,8 +761,8 @@ export default function Dashboard() {
         return {
           stage,
           rejectionRate: Math.max(0, rejectionRate),
-          activeRate: Math.max(0, activeRate),
-          selectionRate: Math.max(0, selectionRate)
+          // activeRate: Math.max(0, activeRate),
+          // selectionRate: Math.max(0, selectionRate)
         };
       })
       .filter(item => item !== null);
@@ -832,40 +844,75 @@ export default function Dashboard() {
               {/* Summary Cards */}
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
                 <Card
-                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  className={`p-4 bg-white shadow-sm rounded-lg ${filteredData?.totalApplicants > 300 ? 'cursor-not-allowed' : 'cursor-pointer'} hover:bg-gray-50`}
                   onClick={() => {
-                    if (!filteredData) return;
-                    const allCandidates = Object.values(filteredData.candidateData || {});
+                    if(filteredData?.totalApplicants > 300) return;
+
+                    if (!dashboardData) return;
+                    const allCandidates = Object.values(dashboardData.candidateData || {});
                     handleCandidateClick(
                       allCandidates.map(c => c.ResumeId),
                       'All Candidates'
                     );
                   }}
                 >
-                  <h3 className="text-sm font-medium text-gray-500">Total Applicants</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Total Applicants</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Total number of candidates who have applied</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
                     {filteredData?.totalApplicants || 0}
                   </p>
                 </Card>
 
                 <Card
-                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  className={`p-4 bg-white shadow-sm rounded-lg ${filteredData?.activePipeline > 300 ? 'cursor-not-allowed' : 'cursor-pointer'} hover:bg-gray-50`}
                   onClick={() => {
-                    if (!filteredData) return;
-                    const activeCandidates = Object.values(filteredData.candidateData || {})
-                      .filter(c => {
-                        const stageName = stageMapping[c.ResumeStage.Value.toString()];
-                        return c.ResumeStage.Value !== 1 && // Not rejected
-                          !["Offer", "Nurturing Campaign", "Hired", "Nuturing Campaign"].includes(stageName); // Not in offer stages
-                      });
+                    if(filteredData?.activePipeline > 300) return;
 
+                    if (!dashboardData) return;
+                    const offerCandidates = Object.entries(dashboardData.candidateData || {})
+                    .filter(([key, data]) => {
+                      if(data.ResumeStage.Value === 1) return false;
+
+                      const [itemMonth, itemJobId] = key.split('_');
+                      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                      const stage = stageMapping[data.ResumeStage.Value];
+                      return monthMatches && jobMatches && !['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stage);
+                    })
+                    .map(([_, data]) => data.ResumeId);
+    
                     handleCandidateClick(
-                      activeCandidates.map(c => c.ResumeId),
+                      offerCandidates,
                       'Active Pipeline'
                     );
+
                   }}
                 >
-                  <h3 className="text-sm font-medium text-gray-500">Active Pipeline</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Active Pipeline</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>All statuses except for Candidates who are not in Offer, Nurturing Campaign, Hired.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
                     {filteredData?.activePipeline || 0}
 
@@ -875,20 +922,36 @@ export default function Dashboard() {
                 <Card
                   className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
                   onClick={() => {
-                    if (!filteredData) return;
-                    const offerCandidates = Object.values(filteredData.candidateData || {})
-                      .filter(c => {
-                        const stageName = stageMapping[c.ResumeStage.Value.toString()];
-                        return ["Offer", "Nurturing Campaign", "Hired", "Nuturing Campaign"].includes(stageName);
-                      });
-
+                    if (!dashboardData) return;
+                    const offerCandidates = Object.entries(dashboardData.candidateData || {})
+                    .filter(([key, data]) => {
+                      const [itemMonth, itemJobId] = key.split('_');
+                      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                      const stage = stageMapping[data.ResumeStage.Value];
+                      return monthMatches && jobMatches && ['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stage);
+                    })
+                    .map(([_, data]) => data.ResumeId);
+    
                     handleCandidateClick(
-                      offerCandidates.map(c => c.ResumeId),
+                      offerCandidates,
                       'Offers'
                     );
                   }}
                 >
-                  <h3 className="text-sm font-medium text-gray-500">Total Offers</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Total Offers</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Candidates who are in Offer, Nurturing Campaign, Hired.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
                     {filteredData?.totalOffers || 0}
                   </p>
@@ -897,8 +960,126 @@ export default function Dashboard() {
                 <Card
                   className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
                   onClick={() => {
-                    if (!filteredData) return;
-                    const rejectedCandidates = Object.values(filteredData.candidateData || {})
+                    if (!dashboardData) return;
+                    const offerCandidates = Object.entries(dashboardData.candidateData || {})
+                    .filter(([key, data]) => {
+                      if(data.ResumeStage.Value === 1) return false;
+                      const [itemMonth, itemJobId] = key.split('_');
+                      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                      const stage = stageMapping[data.ResumeStage.Value];
+                      return monthMatches && jobMatches && ['Nurturing Campaign', "Nuturing Campaign"].includes(stage);
+                    })
+                    .map(([_, data]) => data.ResumeId);
+    
+                    handleCandidateClick(
+                      offerCandidates,
+                      'Yet to Join'
+                    );
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Yet to Join</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Candidates who are in Nurturing Campaign.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredData?.yetToJoin || 0}
+                  </p>
+                </Card>
+
+                <Card
+                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (!dashboardData) return;
+                    const hiredCandidates = Object.entries(dashboardData.candidateData || {})
+                    .filter(([key, data]) => {
+                      const [itemMonth, itemJobId] = key.split('_');
+                      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                      const stage = stageMapping[data.ResumeStage.Value];
+                      return monthMatches && jobMatches && ['Hired'].includes(stage);
+                    })
+                    .map(([_, data]) => data.ResumeId);
+    
+                    handleCandidateClick(
+                      hiredCandidates,
+                      'Hired'
+                    );
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Total Hired</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Candidates who are in Hired status.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredData?.totalHired || 0}
+                  </p>
+                </Card>
+
+                <Card
+                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (!dashboardData) return;
+                    const offerCandidates = Object.entries(dashboardData.candidateData || {})
+                    .filter(([key, data]) => {
+                      const [itemMonth, itemJobId] = key.split('_');
+                      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                      const stage = stageMapping[data.ResumeStage.previousStatus];
+                      return data.ResumeStage.Value === 1 && monthMatches && jobMatches && ['Nurturing Campaign', "Nuturing Campaign"].includes(stage);
+                    })
+                    .map(([_, data]) => data.ResumeId);
+    
+                    handleCandidateClick(
+                      offerCandidates,
+                      'Declined'
+                    );
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Offers Declined</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Candidates who are in Nurturing Campaign and have declined the offer.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredData?.declined || 0}
+                  </p>
+                </Card>
+
+
+                <Card
+                  className={`p-4 bg-white shadow-sm rounded-lg ${filteredData?.totalRejected > 300 ? 'cursor-not-allowed' : 'cursor-pointer'} hover:bg-gray-50`}
+                  onClick={() => {
+                    if(filteredData?.totalRejected > 300) return;
+
+                    if (!dashboardData) return;
+                    const rejectedCandidates = Object.entries(dashboardData.candidateData || {})
                       .filter(c => c.ResumeStage.Value === 1);
 
                     handleCandidateClick(
@@ -907,7 +1088,19 @@ export default function Dashboard() {
                     );
                   }}
                 >
-                  <h3 className="text-sm font-medium text-gray-500">Total Rejected</h3>
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Total Rejected</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Candidates who are in Rejected status.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
                     {filteredData?.totalRejected || 0}
                   </p>
@@ -917,7 +1110,20 @@ export default function Dashboard() {
                 <Card className="p-6 bg-white shadow-sm rounded-lg">
                   <div className="flex justify-between items-start">
                     <div>
-                      <p className="text-sm font-medium text-gray-500">Conversion Rate</p>
+                      <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-medium text-gray-500">Conversion Rate</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Percentage of candidates who are in Offer, Nurturing Campaign, Hired from the total number of candidates.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+
                       <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.conversionRate || "0%"}</h3>
                     </div>
                     <div className="p-2 bg-purple-50 rounded-full">
@@ -931,10 +1137,10 @@ export default function Dashboard() {
               </div>
 
               {/* Add the charts section */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+              <div className="gap-6 mb-6">
                 {/* Recruitment Pipeline */}
                 <Card className="p-4 bg-white shadow-sm rounded-lg">
-                  <h3 className="text-lg font-medium mb-4">Recruitment Pipeline</h3>
+                  <h3 className="text-lg font-medium mb-4">Stage-wise Rejection Rates</h3>
                   <div className="h-80">
                     {filteredData.pipelineChartData.length > 0 ? (
                       <ResponsiveBar
@@ -966,34 +1172,35 @@ export default function Dashboard() {
                         }}
                         labelSkipWidth={12}
                         labelSkipHeight={12}
-                        legends={[
-                          {
-                            dataFrom: 'keys',
-                            anchor: 'bottom',
-                            direction: 'row',
-                            justify: false,
-                            translateX: 0,
-                            translateY: 50,
-                            itemsSpacing: 20,
-                            itemWidth: 100,
-                            itemHeight: 20,
-                            itemDirection: 'left-to-right',
-                            itemOpacity: 0.85,
-                            symbolSize: 12,
-                            data: [
-                              { id: 'active', label: 'Active', color: '#3b82f6' },
-                              { id: 'rejected', label: 'Rejected', color: '#ef4444' }
-                            ],
-                            effects: [
-                              {
-                                on: 'hover',
-                                style: {
-                                  itemOpacity: 1
-                                }
-                              }
-                            ]
-                          }
-                        ]}
+                        // legends={[
+                        //   {
+                        //     dataFrom: 'keys',
+                        //     anchor: 'bottom',
+                        //     direction: 'row',
+                        //     justify: false,
+                        //     translateX: 0,
+                        //     translateY: 50,
+                        //     itemsSpacing: 20,
+                        //     itemWidth: 100,
+                        //     itemHeight: 20,
+                        //     itemDirection: 'left-to-right',
+                        //     itemOpacity: 0.85,
+                        //     symbolSize: 12,
+                        //     data: [
+                        //       { id: 'active', label: 'Active', color: '#3b82f6' },
+                        //       { id: 'rejected', label: 'Rejected', color: '#ef4444' }
+                        //     ],
+                        //     effects: [
+                        //       {
+                        //         on: 'hover',
+                        //         style: {
+                        //           itemOpacity: 1
+                        //         }
+                        //       }
+                        //     ]
+                        //   }
+                        // ]}
+                        legends={[]}
                         tooltip={({ id, value, indexValue, color }) => (
                           <div className="bg-white p-2 shadow-lg rounded-lg border">
                             <strong>{indexValue}</strong>
@@ -1012,7 +1219,7 @@ export default function Dashboard() {
                 </Card>
 
                 {/* Channel Attribution */}
-                <Card className="p-4 bg-white shadow-sm rounded-lg">
+                {/* <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Channel Attribution</h3>
                   <div className="h-80">
                     {filteredData.channelChartData.length > 0 ? (
@@ -1057,12 +1264,12 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
-                </Card>
+                </Card> */}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
                 {/* Monthly Trends */}
-                <Card className="p-4 bg-white shadow-sm rounded-lg">
+                {/* <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Monthly Trends</h3>
                   <div className="h-80">
                     {filteredData.monthlyTrends?.length > 0 ? (
@@ -1151,10 +1358,10 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
-                </Card>
+                </Card> */}
 
                 {/* Stage-wise Conversion Rates */}
-                <Card className="p-4 bg-white shadow-sm rounded-lg">
+                {/* <Card className="p-4 bg-white shadow-sm rounded-lg">
                   <h3 className="text-lg font-medium mb-4">Stage-wise Conversion Rates</h3>
                   <div className="h-80">
                     {filteredData.stageConversionRates?.length > 0 ? (
@@ -1251,7 +1458,7 @@ export default function Dashboard() {
                       </div>
                     )}
                   </div>
-                </Card>
+                </Card> */}
               </div>
 
               {/* Channel Attribution Details */}

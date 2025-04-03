@@ -43,3 +43,23 @@ export interface ChannelData {
     Hired = 'Hired',
     Reject = 'Reject'
 }
+
+
+export const PipelineStageMapping = {
+  Pool : 'Pool',
+  "HR Screening" : 'HR Screening',
+  "Hiring Manager Screening" : 'H-Manager Screening',
+  "Panel Screening" : 'Panel Screening',
+  "Xobin Test" : 'Xobin Test',
+  "L1 Interview" : 'L1 Interview',
+  "L2 Interview" : 'L2 Interview',
+  "Final Round" : 'Final Round',
+  "Pre Offer Documentation" : 'Pre Offer',
+  "HR Round" : 'HR Round',
+  "Offer Approval" : 'Offer Approval',
+  "Offer" : 'Offer',
+  "Nurturing Campaign" : 'Nurturing Campaign',
+  "Nuturing Campaign" : 'Nurturing Campaign',
+  "Hired" : 'Hired',
+  "Reject" : 'Reject'
+}

@@ -4,6 +4,7 @@ import { ResponsivePie } from '@nivo/pie';
 import { ResponsiveBar } from '@nivo/bar';
 import { stageMapping, stageOrderMapping } from '@/utils/dataFetcher';
 import { Users, Award, BarChart, ChevronRight, Briefcase, X } from 'lucide-react';
+import { PipelineStageMapping } from '@/types/dashboard';
 
 // Helper functions
 const getMonthString = (dateString: string) => {
@@ -392,7 +393,7 @@ export default function ReferralDashboard({
         if (data.ResumeStage.Value === 1) {
           if (!values.pipelineStages[previousStage]) {
             values.pipelineStages[previousStage] = {
-              stage: previousStage,
+              stage: PipelineStageMapping[previousStage],
               active: 0,
               rejected: 0
             }
@@ -401,12 +402,12 @@ export default function ReferralDashboard({
         } else {
           if (!values.pipelineStages[currentStage]) {
             values.pipelineStages[currentStage] = {
-              stage: currentStage,
+              stage: PipelineStageMapping[currentStage],
               active: 0,
               rejected: 0
             }
           }
-          values.pipelineStages[currentStage].active++;
+          // values.pipelineStages[currentStage].active++;
         }
 
         // Update top referrers
@@ -522,14 +523,15 @@ export default function ReferralDashboard({
           <div className="mt-4 text-sm text-green-600 flex items-center" onClick={() => {
               const totalCandidates = Object.entries(referralData)
                 .filter(([key, data]) => {
+                  if(data.ResumeStage.Value === 1) return false;
+
                   const [itemMonth, itemJobId] = key.split('_');
                   const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
                   const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
-                  return monthMatches && jobMatches && data.ResumeStage.Value !== 1 && !['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stageMapping[data.ResumeStage.Value]);
+                  return monthMatches && jobMatches && !['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stageMapping[data.ResumeStage.Value]);
                 })
                 .map(([_, data]) => data.ResumeId);
 
-              console.log(totalCandidates);
               onCandidateClick(totalCandidates, 'Active Pipeline');
             }}>
             <span>Active Pipeline</span>
@@ -553,6 +555,7 @@ export default function ReferralDashboard({
             onClick={() => {
               const offerCandidates = Object.entries(referralData)
                 .filter(([key, data]) => {
+                  
                   const [itemMonth, itemJobId] = key.split('_');
                   const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
                   const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
@@ -618,7 +621,7 @@ export default function ReferralDashboard({
 
       {/* Recruitment Pipeline Card */}
       <Card className="p-6 bg-white shadow-sm rounded-lg">
-        <h2 className="text-lg font-semibold text-gray-900 mb-4">Recruitment Pipeline</h2>
+        <h2 className="text-lg font-semibold text-gray-900 mb-4">Stage-wise Rejection Rates</h2>
         <div className="h-[400px]">
           {filteredData?.pipelineChartData?.length > 0 ? (
             <ResponsiveBar
@@ -727,7 +730,7 @@ export default function ReferralDashboard({
       </Card>
 
       {/* Top Referrers and Monthly Trend in the same row */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="">
         {/* Top Referrers */}
         <Card className="p-6 bg-white shadow-sm rounded-lg">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Top Referrers</h2>
@@ -759,7 +762,7 @@ export default function ReferralDashboard({
         </Card>
 
         {/* Monthly Trend */}
-        <Card className="p-6 bg-white shadow-sm rounded-lg">
+        {/* <Card className="p-6 bg-white shadow-sm rounded-lg">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Monthly Referral Trend</h2>
           <div className="h-[300px]">
             {filteredData?.monthlyTrendData?.length > 0 ? (
@@ -828,7 +831,7 @@ export default function ReferralDashboard({
               </div>
             )}
           </div>
-        </Card>
+        </Card> */}
       </div>
     </div>
   );

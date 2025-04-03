@@ -3,6 +3,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } f
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
 import { Badge } from '@/components/ui/badge';
 import { ExternalLink } from 'lucide-react';
+import { PipelineStageMapping } from '@/types/dashboard';
 
 interface CandidateDetailsModalProps {
   isOpen: boolean;
@@ -81,7 +82,7 @@ export default function CandidateDetailsModal({
               <TableHead>Stage</TableHead>
               <TableHead>Source</TableHead>
               <TableHead>Experience</TableHead>
-              <TableHead>Upload Date</TableHead>
+              <TableHead>Date</TableHead>
               <TableHead>Resume</TableHead>
             </TableRow>
           </TableHeader>
@@ -98,8 +99,8 @@ export default function CandidateDetailsModal({
                   <div className="text-xs text-gray-500">{candidate.Parent.JobCode}</div>
                 </TableCell>
                 <TableCell>
-                  <Badge variant={candidate.ResumeStage.Name === "Reject" ? "destructive" : "default"}>
-                    {candidate.ResumeStage.Name}
+                  <Badge variant={candidate.ResumeStage?.Value === 1 ? "destructive" : "default"}>
+                    {candidate.ResumeStage?.Name}
                   </Badge>
                 </TableCell>
                 <TableCell>
@@ -117,7 +118,7 @@ export default function CandidateDetailsModal({
                   )}
                 </TableCell>
                 <TableCell>
-                  {new Date(candidate.UploadDateTime).toLocaleDateString()}
+                  {new Date(candidate.DateTime || candidate.UploadDateTime).toLocaleDateString()}
                 </TableCell>
                 <TableCell>
                   <a 

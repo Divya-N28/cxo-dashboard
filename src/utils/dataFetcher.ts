@@ -106,7 +106,7 @@ export const stageMapping: StageMapping = {
     "19": "Nurturing Campaign",
     "6": "Hired",
     "1": "Reject",
-    "27": "Nuturing Campaign"
+    "27": "Nurturing Campaign"
 };
 
   const l2SelectStages = [
@@ -569,7 +569,7 @@ export async function testApiToken(token: string): Promise<{ success: boolean; m
     });
     
     if (response.status === 200) {
-      return { success: true };
+      return { success: true, token: token };
     }
     
     return { success: false, message: 'Invalid API token' };
@@ -1726,6 +1726,9 @@ async function generateDashboardData(token: string) {
           totalRejected: 0,
           totalOffers:0,
           activePipeline:0,
+          totalHired:0,
+          yetToJoin:0,
+          declined:0,
           channel: {},
         };
       }
@@ -1737,14 +1740,18 @@ async function generateDashboardData(token: string) {
 
       if (resume.Status === 1) {
         allMap.totalRejected++;
+        const previousStatus = stageMapping[resume.PreviousStatus];
+        if(previousStatus === "Nurturing Campaign" || previousStatus === "Nuturing Campaign") {
+          allMap.declined++;
+        }
       } else if (status === 'Offer' || status === 'Nurturing Campaign' || status === 'Hired' || status === 'Nuturing Campaign') {
         allMap.totalOffers++;
         allMap.offer++;
-        if(!offers[month]){
-          offers[month] = 0;
+        if(status === 'Hired') {
+          allMap.totalHired++;
+        } else if(status === 'Nuturing Campaign' || status === 'Nurturing Campaign') {
+          allMap.yetToJoin++;
         }
-        offers[month]++;
-
       } else {
         allMap.activePipeline++;
       }
@@ -1791,13 +1798,10 @@ async function generateDashboardData(token: string) {
       // Store candidate data
       candidateData[`${month}_${resume.Parent.ParentId}_${resume.ResumeId}`] = userData;
 
-      if(sourceName === "Referral") {
+      if(sourceName === "Referral" ||  sourceName === "E5 Referral") {
         refferals[`${month}_${resume.Parent.ParentId}_${resume.ResumeId}`] = userData;
       }      
     });
-
-     {
-     }
 
     return { 
       data: {

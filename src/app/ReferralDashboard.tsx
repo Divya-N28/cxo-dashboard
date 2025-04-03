@@ -82,7 +82,7 @@ export default function ReferralDashboard({ referralData, onCandidateClick }: Re
         </Card>
       </div>
       
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="">
         {/* Top Referrers */}
         <Card className="p-6 bg-white shadow-sm rounded-lg">
           <h2 className="text-lg font-semibold text-gray-900 mb-4">Top Referrers</h2>
