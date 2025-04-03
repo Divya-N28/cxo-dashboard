@@ -66,7 +66,7 @@ export default function CandidateDetailsModal({
   
   return (
     <Dialog open={isOpen} onOpenChange={onClose} >
-      <DialogContent className="w-full max-w-max max-h-[80vh] overflow-y-auto">
+      <DialogContent className="w-full  max-h-[80vh] overflow-y-auto" style={{ maxWidth: '90%' }}>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
           <DialogDescription>

@@ -873,6 +873,10 @@ export default function Dashboard() {
                     {filteredData?.totalApplicants || 0}
                   </p>
                 </Card>
+              </div>
+              <h3 className="text-lg font-medium mb-4">Applicants to Offer Ratio</h3>
+
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
 
                 <Card
                   className={`p-4 bg-white shadow-sm rounded-lg ${filteredData?.activePipeline > 300 ? 'cursor-not-allowed' : 'cursor-pointer'} hover:bg-gray-50`}
@@ -957,42 +961,107 @@ export default function Dashboard() {
                   </p>
                 </Card>
 
-                <Card
-                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
-                  onClick={() => {
-                    if (!dashboardData) return;
-                    const offerCandidates = Object.entries(dashboardData.candidateData || {})
-                    .filter(([key, data]) => {
-                      if(data.ResumeStage.Value === 1) return false;
-                      const [itemMonth, itemJobId] = key.split('_');
-                      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
-                      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
-                      const stage = stageMapping[data.ResumeStage.Value];
-                      return monthMatches && jobMatches && ['Nurturing Campaign', "Nuturing Campaign"].includes(stage);
-                    })
-                    .map(([_, data]) => data.ResumeId);
-    
-                    handleCandidateClick(
-                      offerCandidates,
-                      'Yet to Join'
-                    );
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-gray-500">Yet to Join</h3>
+                
+                {/* Conversion Rate */}
+                <Card className="p-6 bg-white shadow-sm rounded-lg">
+                  <div className="flex justify-between items-start">
+                    <div>
+                      <div className="flex items-center justify-between gap-2">
+                    <h3 className="text-sm font-medium text-gray-500">Conversion Rate</h3>
                     <TooltipProvider>
                       <Tooltip>
                         <TooltipTrigger asChild>
                           <Info className="h-4 w-4 text-gray-400" />
                         </TooltipTrigger>
                         <TooltipContent>
-                          <p>Candidates who are in Nurturing Campaign.</p>
+                          <p>Percentage of candidates who are in Offer, Nurturing Campaign, Hired from the total number of candidates.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+
+                      <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.conversionRate || "0%"}</h3>
+                    </div>
+                    <div className="p-2 bg-purple-50 rounded-full">
+                      <BarChart className="h-5 w-5 text-purple-500" />
+                    </div>
+                  </div>
+                  <div className="mt-4 text-sm text-purple-600 flex items-center">
+                    <span>Applicants to offers</span>
+                  </div>
+                </Card>
+                <Card
+                  className={`p-4 bg-white shadow-sm rounded-lg ${filteredData?.totalRejected > 300 ? 'cursor-not-allowed' : 'cursor-pointer'} hover:bg-gray-50`}
+                  onClick={() => {
+                    if(filteredData?.totalRejected > 300) return;
+
+                    if (!dashboardData) return;
+                    const rejectedCandidates = Object.entries(dashboardData.candidateData || {})
+                      .filter(c => c.ResumeStage.Value === 1);
+
+                    handleCandidateClick(
+                      rejectedCandidates.map(c => c.ResumeId),
+                      'Rejected Candidates'
+                    );
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Total Rejected</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Candidates who are in Rejected status.</p>
                         </TooltipContent>
                       </Tooltip>
                     </TooltipProvider>
                   </div>
                   <p className="text-2xl font-semibold text-gray-900 mt-2">
-                    {filteredData?.yetToJoin || 0}
+                    {filteredData?.totalRejected || 0}
+                  </p>
+                </Card>
+                </div>
+<h3 className="text-lg font-medium mb-4">Offer to Hired Ratio</h3>
+
+<div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+
+                <Card
+                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (!dashboardData) return;
+                    const offerCandidates = Object.entries(dashboardData.candidateData || {})
+                    .filter(([key, data]) => {
+                      const [itemMonth, itemJobId] = key.split('_');
+                      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                      const stage = stageMapping[data.ResumeStage.Value];
+                      return monthMatches && jobMatches && ['Offer', 'Nurturing Campaign', 'Hired', "Nuturing Campaign"].includes(stage);
+                    })
+                    .map(([_, data]) => data.ResumeId);
+    
+                    handleCandidateClick(
+                      offerCandidates,
+                      'Offers'
+                    );
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Total Offers</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Candidates who are in Offer, Nurturing Campaign, Hired.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredData?.totalOffers || 0}
                   </p>
                 </Card>
 
@@ -1033,6 +1102,46 @@ export default function Dashboard() {
                     {filteredData?.totalHired || 0}
                   </p>
                 </Card>
+                
+                <Card
+                  className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
+                  onClick={() => {
+                    if (!dashboardData) return;
+                    const offerCandidates = Object.entries(dashboardData.candidateData || {})
+                    .filter(([key, data]) => {
+                      if(data.ResumeStage.Value === 1) return false;
+                      const [itemMonth, itemJobId] = key.split('_');
+                      const monthMatches = selectedMonth === "All" || selectedMonth === itemMonth;
+                      const jobMatches = selectedJobs.length === 0 || selectedJobs.includes(itemJobId);
+                      const stage = stageMapping[data.ResumeStage.Value];
+                      return monthMatches && jobMatches && ['Nurturing Campaign', "Nuturing Campaign"].includes(stage);
+                    })
+                    .map(([_, data]) => data.ResumeId);
+    
+                    handleCandidateClick(
+                      offerCandidates,
+                      'Yet to Join'
+                    );
+                  }}
+                >
+                  <div className="flex items-center justify-between">
+                    <h3 className="text-sm font-medium text-gray-500">Yet to Join</h3>
+                    <TooltipProvider>
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <Info className="h-4 w-4 text-gray-400" />
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <p>Candidates who are in Nurturing Campaign.</p>
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  </div>
+                  <p className="text-2xl font-semibold text-gray-900 mt-2">
+                    {filteredData?.yetToJoin || 0}
+                  </p>
+                </Card>
+
 
                 <Card
                   className="p-4 bg-white shadow-sm rounded-lg cursor-pointer hover:bg-gray-50"
@@ -1073,67 +1182,7 @@ export default function Dashboard() {
                 </Card>
 
 
-                <Card
-                  className={`p-4 bg-white shadow-sm rounded-lg ${filteredData?.totalRejected > 300 ? 'cursor-not-allowed' : 'cursor-pointer'} hover:bg-gray-50`}
-                  onClick={() => {
-                    if(filteredData?.totalRejected > 300) return;
-
-                    if (!dashboardData) return;
-                    const rejectedCandidates = Object.entries(dashboardData.candidateData || {})
-                      .filter(c => c.ResumeStage.Value === 1);
-
-                    handleCandidateClick(
-                      rejectedCandidates.map(c => c.ResumeId),
-                      'Rejected Candidates'
-                    );
-                  }}
-                >
-                  <div className="flex items-center justify-between">
-                    <h3 className="text-sm font-medium text-gray-500">Total Rejected</h3>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="h-4 w-4 text-gray-400" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Candidates who are in Rejected status.</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-                  <p className="text-2xl font-semibold text-gray-900 mt-2">
-                    {filteredData?.totalRejected || 0}
-                  </p>
-                </Card>
-
-                {/* Conversion Rate */}
-                <Card className="p-6 bg-white shadow-sm rounded-lg">
-                  <div className="flex justify-between items-start">
-                    <div>
-                      <div className="flex items-center justify-between gap-2">
-                    <h3 className="text-sm font-medium text-gray-500">Conversion Rate</h3>
-                    <TooltipProvider>
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Info className="h-4 w-4 text-gray-400" />
-                        </TooltipTrigger>
-                        <TooltipContent>
-                          <p>Percentage of candidates who are in Offer, Nurturing Campaign, Hired from the total number of candidates.</p>
-                        </TooltipContent>
-                      </Tooltip>
-                    </TooltipProvider>
-                  </div>
-
-                      <h3 className="text-2xl font-bold text-gray-900 mt-1">{filteredData?.conversionRate || "0%"}</h3>
-                    </div>
-                    <div className="p-2 bg-purple-50 rounded-full">
-                      <BarChart className="h-5 w-5 text-purple-500" />
-                    </div>
-                  </div>
-                  <div className="mt-4 text-sm text-purple-600 flex items-center">
-                    <span>Applicants to offers</span>
-                  </div>
-                </Card>
+                
               </div>
 
               {/* Add the charts section */}
