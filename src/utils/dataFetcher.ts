@@ -536,7 +536,7 @@ apiClient.interceptors.response.use(
                     data: new URLSearchParams({
                         'client_id': 'TH.Mvc.Api',
                         'client_secret': 'a4dc1f627af9400084b56d8b68d8d910',
-                        'refresh_token': "0F13791F3EE871E428403A486155470392321E766E2E2C3F45B55C0DFCA20B5E-1",
+                        'refresh_token': "C22176D96EB3CCB58B0ACFCCF4B155FA924E0B05B2FF348AEA29FD3A70B41AEE-1",
                         'grant_type': 'refresh_token'
                     }).toString()
                 });
